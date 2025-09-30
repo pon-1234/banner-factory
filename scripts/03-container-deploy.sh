@@ -28,11 +28,18 @@ services=("ingest-api" "prompt-builder" "bg-generator" "compositor" "qc-service"
 
 for svc in "${services[@]}"; do
     echo "🔨 $svc をビルドしています..."
+    sa_account=$(echo "$svc" | tr '-' '_')
     
-    # コンテナイメージのビルド
-    gcloud builds submit --tag \
-        "${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/${svc}:$(git rev-parse --short HEAD)" \
-        ./services/${svc}
+    # コンテナイメージのビルド（プロジェクトルートからビルドコンテキストを設定）
+    cat > /tmp/cloudbuild-${svc}.yaml <<EOF
+steps:
+- name: 'gcr.io/cloud-builders/docker'
+  args: ['build', '-f', './services/${svc}/Dockerfile', '-t', '${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/${svc}:$(git rev-parse --short HEAD)', '.']
+images:
+- '${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/${svc}:$(git rev-parse --short HEAD)'
+EOF
+    
+    gcloud builds submit --config=/tmp/cloudbuild-${svc}.yaml .
     
     echo "🚀 $svc をデプロイしています..."
     
@@ -41,8 +48,8 @@ for svc in "${services[@]}"; do
         --region=${REGION} \
         --image="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/${svc}:$(git rev-parse --short HEAD)" \
         --platform=managed \
-        --allow-unauthenticated=false \
-        --service-account="${svc}@${PROJECT_ID}.iam.gserviceaccount.com"
+        --no-allow-unauthenticated \
+        --service-account="${sa_account}@${PROJECT_ID}.iam.gserviceaccount.com"
     
     echo "✅ $svc のデプロイが完了しました"
 done

@@ -2,3 +2,10 @@
 > prompt-builder@0.1.0 build
 > tsc -p tsconfig.json
 
+error TS5083: Cannot read file '/Users/pon/dev/banner-factory/services/prompt-builder/tsconfig.base.json'.
+../../node_modules/gaxios/build/src/gaxios.d.ts(6,5): error TS18028: Private identifiers are only available when targeting ECMAScript 2015 and higher.
+../../node_modules/google-auth-library/build/src/auth/awsclient.d.ts(84,5): error TS18028: Private identifiers are only available when targeting ECMAScript 2015 and higher.
+../../node_modules/google-auth-library/build/src/auth/baseexternalclient.d.ts(176,5): error TS18028: Private identifiers are only available when targeting ECMAScript 2015 and higher.
+../../node_modules/google-auth-library/build/src/auth/googleauth.d.ts(90,5): error TS18028: Private identifiers are only available when targeting ECMAScript 2015 and higher.
+../../node_modules/google-auth-library/build/src/util.d.ts(134,5): error TS18028: Private identifiers are only available when targeting ECMAScript 2015 and higher.
+../../node_modules/gtoken/build/src/index.d.ts(38,5): error TS18028: Private identifiers are only available when targeting ECMAScript 2015 and higher.
