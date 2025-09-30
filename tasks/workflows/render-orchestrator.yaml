@@ -1,0 +1,53 @@
+# Cloud Workflows definition for orchestrating banner renders
+main:
+  params: [request]
+  steps:
+    - init:
+        assign:
+          - campaignId: ${request.campaign_id}
+          - templates: ${request.templates}
+          - sizes: ${request.sizes}
+          - variantCount: ${request.count_per_template}
+          - bgMode: ${request.bg_mode}
+    - iterateTemplates:
+        for:
+          value: template
+          in: ${templates}
+          steps:
+            - iterateVariants:
+                for:
+                  value: idx
+                  range: [0, ${variantCount - 1}]
+                  steps:
+                    - buildVariant:
+                        call: http.post
+                        args:
+                          url: ${"https://" + env["PROMPT_BUILDER_HOST"] + "/workflows/variants"}
+                          auth:
+                            type: OIDC
+                          body:
+                            campaign_id: ${campaignId}
+                            template: ${template}
+                            variant_index: ${idx}
+                            request: ${request}
+                        result: variantResponse
+                    - enqueueBackground:
+                        call: pubsub.projects.topics.publish
+                        args:
+                          topic: ${"projects/" + sys.get_env("GCP_PROJECT") + "/topics/" + env["BG_TOPIC"]}
+                          body:
+                            messages:
+                              - json:
+                                  variant_id: ${variantResponse.body.variant_id}
+                                  campaign_id: ${campaignId}
+                                  template: ${template}
+                                  tone: ${variantResponse.body.tone}
+                                  prompt: ${variantResponse.body.prompt}
+                                  seed: ${variantResponse.body.seed}
+                                  refs: ${variantResponse.body.refs}
+                                  sizes: ${variantResponse.body.sizes}
+                                  brand: ${variantResponse.body.brand}
+                                  slug: ${variantResponse.body.slug}
+                                  copy: ${variantResponse.body.copy}
+    - return:
+        return: { status: "queued" }
