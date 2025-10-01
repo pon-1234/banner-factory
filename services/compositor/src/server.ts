@@ -1,8 +1,9 @@
-import Fastify from "fastify";
+import Fastify, { type FastifyBaseLogger } from "fastify";
 import { Firestore } from "@google-cloud/firestore";
 import { Storage, type File, type SaveOptions } from "@google-cloud/storage";
 import { PubSub } from "@google-cloud/pubsub";
 import { createCanvas, loadImage, registerFont, type CanvasRenderingContext2D } from "canvas";
+import OpenAI from "openai";
 import { AspectRatio, TemplateCode, buildStoragePath, isoUtcNow } from "@banner/shared";
 import path from "node:path";
 import os from "node:os";
@@ -26,7 +27,7 @@ void (async () => {
       registerFont(regularFontPath, { family: "NotoSansJP", weight: "normal" });
     }
   } catch {
-    // Fonts are optional during local development; default fonts will be used instead.
+    // Fonts remain optional for local development.
   }
 })();
 
@@ -36,12 +37,24 @@ const pubsub = new PubSub();
 
 const OUTPUT_BUCKET = process.env.OUTPUT_BUCKET ?? "banner-assets";
 const QC_TOPIC = process.env.QC_TOPIC ?? "qc-tasks";
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY ?? "";
+const OPENAI_IMAGE_MODEL = process.env.OPENAI_IMAGE_MODEL ?? "gpt-image-1";
+const OPENAI_IMAGE_QUALITY = process.env.OPENAI_IMAGE_QUALITY ?? "standard";
+
+const openaiClient = OPENAI_API_KEY ? new OpenAI({ apiKey: OPENAI_API_KEY }) : null;
 
 const SIZE_MAP: Record<AspectRatio, { width: number; height: number }> = {
   "1080x1080": { width: 1080, height: 1080 },
   "1080x1350": { width: 1080, height: 1350 },
   "1200x628": { width: 1200, height: 628 },
   "1080x1920": { width: 1080, height: 1920 }
+};
+
+const OPENAI_SIZE_HINT: Record<AspectRatio, string> = {
+  "1080x1080": "1024x1024",
+  "1080x1350": "1024x1536",
+  "1200x628": "1536x1024",
+  "1080x1920": "1024x1792"
 };
 
 interface CopyPayload {
@@ -59,11 +72,27 @@ interface ComposeTaskPayload {
   template: TemplateCode;
   tone: "救済" | "緊急" | "権威";
   size: AspectRatio;
-  background_path: string;
-  background_meta_path?: string;
+  prompt: string;
+  seed: string;
   brand: string;
   slug: string;
   copy: CopyPayload;
+}
+
+interface GenerationMetadata {
+  provider: string;
+  model?: string;
+  request_size?: string;
+  original_prompt?: string;
+  final_prompt?: string;
+  copy_lines?: string[];
+  guidance_lines?: string[];
+  fallback_reason?: string;
+}
+
+interface ComposeResult {
+  buffer: Buffer;
+  metadata: GenerationMetadata;
 }
 
 function splitGcsPath(gcsPath: string): { bucket: string; object: string } {
@@ -74,62 +103,105 @@ function splitGcsPath(gcsPath: string): { bucket: string; object: string } {
   return { bucket: match[1], object: match[2] };
 }
 
-async function downloadFromGcs(gcsPath: string): Promise<Buffer> {
-  const { bucket, object } = splitGcsPath(gcsPath);
-  const [file] = await storage.bucket(bucket).file(object).download();
-  return file;
+function collectCopyLines(copy: CopyPayload): string[] {
+  const lines = [`Headline: ${copy.headline}`];
+  if (copy.sub) {
+    lines.push(`Subheadline: ${copy.sub}`);
+  }
+  if (copy.badges?.length) {
+    lines.push(`Badge text: ${copy.badges.join(" | ")}`);
+  }
+  lines.push(`Call to action: ${copy.cta}`);
+  if (copy.disclaimer) {
+    lines.push(`Disclaimer: ${copy.disclaimer}`);
+  }
+  if (copy.stat_note) {
+    lines.push(`Stat note: ${copy.stat_note}`);
+  }
+  return lines;
 }
 
-function parseGcs(gcsPath: string) {
-  const { bucket, object } = splitGcsPath(gcsPath);
-  return { bucket, name: object };
+function buildOpenAiPrompt(payload: ComposeTaskPayload, copyLines: string[]): { finalPrompt: string; guidance: string[] } {
+  const guidance = [
+    `Campaign brand: ${payload.brand}.`,
+    `Tone keyword: ${payload.tone}.`,
+    `Target aspect ratio: ${payload.size}.`,
+    "Render as a polished Japanese digital advertisement with crisp, non-handwritten typography.",
+    "Ensure every provided line of text is fully legible without truncation or spelling errors.",
+    "Place the CTA as a distinct button or bar; disclaimers/stat notes should appear as small but readable footer text.",
+    "Avoid generating any additional slogans or text beyond what is provided."
+  ];
+
+  const finalPrompt = [
+    payload.prompt,
+    ...guidance,
+    "Include the following Japanese text exactly as written:",
+    ...copyLines
+  ].join("\n");
+
+  return { finalPrompt, guidance };
 }
 
-async function saveBufferToGcs(
-  file: File,
-  buffer: Buffer,
-  options: SaveOptions = {},
-  attempt = 1
-): Promise<void> {
-  try {
-    await file.save(buffer, { resumable: false, ...options });
-  } catch (err) {
-    const error = err as { code?: number } & Error;
-    const code = error.code;
-    const message = error.message ?? "";
-    if (attempt < 6 && (code === 429 || code === 503 || message.includes("rateLimitExceeded"))) {
-      const waitMs = attempt * 200;
-      await new Promise((resolve) => setTimeout(resolve, waitMs));
-      await saveBufferToGcs(file, buffer, options, attempt + 1);
-      return;
+async function generateOpenAiBanner(payload: ComposeTaskPayload, size: { width: number; height: number }): Promise<ComposeResult> {
+  if (!openaiClient) {
+    throw new Error("OPENAI_API_KEY is required for OpenAI image generation");
+  }
+
+  const copyLines = collectCopyLines(payload.copy);
+  const { finalPrompt, guidance } = buildOpenAiPrompt(payload, copyLines);
+  const requestSize = OPENAI_SIZE_HINT[payload.size] ?? "1024x1024";
+
+  const response = await openaiClient.images.generate({
+    model: OPENAI_IMAGE_MODEL,
+    prompt: finalPrompt,
+    size: requestSize,
+    quality: OPENAI_IMAGE_QUALITY,
+    response_format: "b64_json"
+  });
+
+  const imageData = response.data?.[0]?.b64_json;
+  if (!imageData) {
+    throw new Error("openai image response missing data");
+  }
+
+  const rawBuffer = Buffer.from(imageData, "base64");
+  const sourceImage = await loadImage(rawBuffer);
+  const canvas = createCanvas(size.width, size.height);
+  const ctx = canvas.getContext("2d");
+  drawImageCover(ctx, sourceImage, size.width, size.height);
+  const buffer = canvas.toBuffer("image/png");
+
+  return {
+    buffer,
+    metadata: {
+      provider: "openai-image-api",
+      model: OPENAI_IMAGE_MODEL,
+      request_size: requestSize,
+      original_prompt: payload.prompt,
+      final_prompt: finalPrompt,
+      copy_lines: copyLines,
+      guidance_lines: guidance
     }
-    throw err;
-  }
+  };
 }
 
-interface BackgroundMetadata {
-  provider?: string;
-  seed?: string;
-  [key: string]: unknown;
-}
-
-async function loadMetadata(metaPath?: string): Promise<BackgroundMetadata | null> {
-  if (!metaPath) {
-    return null;
-  }
-  try {
-    const buffer = await downloadFromGcs(metaPath);
-    return JSON.parse(buffer.toString()) as BackgroundMetadata;
-  } catch {
-    return null;
-  }
-}
-
-function drawFallbackBackground(
+function drawImageCover(
   ctx: CanvasRenderingContext2D,
-  size: { width: number; height: number },
-  seed: string
+  image: { width: number; height: number },
+  targetWidth: number,
+  targetHeight: number
 ) {
+  const scale = Math.max(targetWidth / image.width, targetHeight / image.height);
+  const drawWidth = image.width * scale;
+  const drawHeight = image.height * scale;
+  const offsetX = (targetWidth - drawWidth) / 2;
+  const offsetY = (targetHeight - drawHeight) / 2;
+  ctx.drawImage(image as any, offsetX, offsetY, drawWidth, drawHeight);
+}
+
+function createFallbackGradient(size: { width: number; height: number }, seed: string): Buffer {
+  const canvas = createCanvas(size.width, size.height);
+  const ctx = canvas.getContext("2d");
   const hash = crypto.createHash("sha256").update(seed).digest();
   const colorA = `#${hash.subarray(0, 3).toString("hex")}`;
   const colorB = `#${hash.subarray(3, 6).toString("hex")}`;
@@ -138,101 +210,6 @@ function drawFallbackBackground(
   gradient.addColorStop(1, colorB);
   ctx.fillStyle = gradient;
   ctx.fillRect(0, 0, size.width, size.height);
-}
-
-async function drawBackground(
-  ctx: CanvasRenderingContext2D,
-  size: { width: number; height: number },
-  payload: ComposeTaskPayload
-): Promise<void> {
-  const metadata = await loadMetadata(payload.background_meta_path);
-  const fallbackSeed =
-    typeof metadata?.seed === "string" && metadata.seed.length > 0 ? metadata.seed : payload.variant_id;
-
-  if (metadata?.provider === "fallback") {
-    drawFallbackBackground(ctx, size, fallbackSeed);
-    return;
-  }
-
-  try {
-    const bgBuffer = await downloadFromGcs(payload.background_path);
-    const bgImage = await loadImage(bgBuffer);
-    ctx.drawImage(bgImage, 0, 0, size.width, size.height);
-  } catch (error) {
-    const message = (error as Error).message ?? "";
-    if (metadata?.provider === "fallback" || message.includes("out of memory")) {
-      drawFallbackBackground(ctx, size, fallbackSeed);
-      return;
-    }
-    throw error;
-  }
-}
-
-async function composeBanner(payload: ComposeTaskPayload): Promise<Buffer> {
-  const size = SIZE_MAP[payload.size];
-  if (!size) {
-    throw new Error(`Unsupported size ${payload.size}`);
-  }
-
-  const canvas = createCanvas(size.width, size.height);
-  const ctx = canvas.getContext("2d");
-
-  await drawBackground(ctx, size, payload);
-
-  // Overlay for readability if needed
-  ctx.fillStyle = "rgba(0,0,0,0.45)";
-  ctx.fillRect(size.width * 0.05, size.height * 0.05, size.width * 0.9, size.height * 0.6);
-
-  // Headline
-  ctx.fillStyle = "#FFFFFF";
-  ctx.font = "bold 64px NotoSansJP";
-  ctx.textAlign = "left";
-  ctx.textBaseline = "top";
-  const textX = size.width * 0.08;
-  const textY = size.height * 0.08;
-  wrapText(ctx, payload.copy.headline, textX, textY, size.width * 0.84, 74);
-
-  if (payload.copy.sub) {
-    ctx.font = "normal 40px NotoSansJP";
-    wrapText(ctx, payload.copy.sub, textX, textY + size.height * 0.25, size.width * 0.84, 50);
-  }
-
-  if (payload.copy.badges?.length) {
-    ctx.font = "bold 36px NotoSansJP";
-    const badgeY = size.height * 0.55;
-    payload.copy.badges.forEach((badge, index) => {
-      const badgeX = textX + index * (size.width * 0.28 + 20);
-      ctx.fillStyle = "rgba(247, 147, 26, 0.9)";
-      const paddingX = 24;
-      const paddingY = 16;
-      const textWidth = ctx.measureText(badge).width;
-      ctx.fillRect(badgeX, badgeY, textWidth + paddingX, 48 + paddingY);
-      ctx.fillStyle = "#111111";
-      ctx.fillText(badge, badgeX + paddingX / 2, badgeY + paddingY / 2);
-    });
-  }
-
-  // CTA bar
-  ctx.fillStyle = "#F7931A";
-  const ctaHeight = 96;
-  ctx.fillRect(0, size.height - ctaHeight, size.width, ctaHeight);
-  ctx.fillStyle = "#111111";
-  ctx.font = "bold 44px NotoSansJP";
-  ctx.textAlign = "center";
-  ctx.fillText(payload.copy.cta, size.width / 2, size.height - ctaHeight + 24);
-
-  // Disclaimer/stat note
-  if (payload.copy.disclaimer || payload.copy.stat_note) {
-    ctx.fillStyle = "rgba(0,0,0,0.7)";
-    const noteY = size.height - ctaHeight - 80;
-    ctx.fillRect(0, noteY, size.width, 80);
-    ctx.fillStyle = "#FFFFFF";
-    ctx.font = "normal 28px NotoSansJP";
-    ctx.textAlign = "left";
-    const disclaimerText = [payload.copy.disclaimer, payload.copy.stat_note].filter(Boolean).join(" / ");
-    wrapText(ctx, disclaimerText, textX, noteY + 8, size.width * 0.84, 32);
-  }
-
   return canvas.toBuffer("image/png");
 }
 
@@ -263,7 +240,125 @@ function wrapText(
   }
 }
 
-async function saveOutput(buffer: Buffer, payload: ComposeTaskPayload): Promise<{ assetPath: string; previewPath: string }> {
+async function composeFallbackBanner(
+  payload: ComposeTaskPayload,
+  size: { width: number; height: number },
+  reason: string
+): Promise<ComposeResult> {
+  const gradientBuffer = createFallbackGradient(size, `${payload.variant_id}-${payload.seed}`);
+  const backgroundImage = await loadImage(gradientBuffer);
+  const canvas = createCanvas(size.width, size.height);
+  const ctx = canvas.getContext("2d");
+
+  drawImageCover(ctx, backgroundImage, size.width, size.height);
+
+  ctx.fillStyle = "rgba(0,0,0,0.45)";
+  ctx.fillRect(size.width * 0.05, size.height * 0.05, size.width * 0.9, size.height * 0.6);
+
+  ctx.fillStyle = "#FFFFFF";
+  ctx.font = "bold 64px NotoSansJP";
+  ctx.textAlign = "left";
+  ctx.textBaseline = "top";
+  const textX = size.width * 0.08;
+  const textY = size.height * 0.08;
+  wrapText(ctx, payload.copy.headline, textX, textY, size.width * 0.84, 74);
+
+  if (payload.copy.sub) {
+    ctx.font = "normal 40px NotoSansJP";
+    wrapText(ctx, payload.copy.sub, textX, textY + size.height * 0.25, size.width * 0.84, 50);
+  }
+
+  if (payload.copy.badges?.length) {
+    ctx.font = "bold 36px NotoSansJP";
+    const badgeY = size.height * 0.55;
+    payload.copy.badges.forEach((badge, index) => {
+      const badgeX = textX + index * (size.width * 0.28 + 20);
+      ctx.fillStyle = "rgba(247, 147, 26, 0.9)";
+      const paddingX = 24;
+      const paddingY = 16;
+      const textWidth = ctx.measureText(badge).width;
+      ctx.fillRect(badgeX, badgeY, textWidth + paddingX, 48 + paddingY);
+      ctx.fillStyle = "#111111";
+      ctx.fillText(badge, badgeX + paddingX / 2, badgeY + paddingY / 2);
+    });
+  }
+
+  ctx.fillStyle = "#F7931A";
+  const ctaHeight = 96;
+  ctx.fillRect(0, size.height - ctaHeight, size.width, ctaHeight);
+  ctx.fillStyle = "#111111";
+  ctx.font = "bold 44px NotoSansJP";
+  ctx.textAlign = "center";
+  ctx.fillText(payload.copy.cta, size.width / 2, size.height - ctaHeight + 24);
+
+  if (payload.copy.disclaimer || payload.copy.stat_note) {
+    ctx.fillStyle = "rgba(0,0,0,0.7)";
+    const noteY = size.height - ctaHeight - 80;
+    ctx.fillRect(0, noteY, size.width, 80);
+    ctx.fillStyle = "#FFFFFF";
+    ctx.font = "normal 28px NotoSansJP";
+    ctx.textAlign = "left";
+    const disclaimerText = [payload.copy.disclaimer, payload.copy.stat_note].filter(Boolean).join(" / ");
+    wrapText(ctx, disclaimerText, textX, noteY + 8, size.width * 0.84, 32);
+  }
+
+  const buffer = canvas.toBuffer("image/png");
+
+  return {
+    buffer,
+    metadata: {
+      provider: "canvas-fallback",
+      fallback_reason: reason,
+      copy_lines: collectCopyLines(payload.copy)
+    }
+  };
+}
+
+async function composeBanner(payload: ComposeTaskPayload, log: FastifyBaseLogger): Promise<ComposeResult> {
+  const size = SIZE_MAP[payload.size];
+  if (!size) {
+    throw new Error(`Unsupported size ${payload.size}`);
+  }
+
+  if (openaiClient) {
+    try {
+      return await generateOpenAiBanner(payload, size);
+    } catch (error) {
+      log.error({ err: error, variant: payload.variant_id, size: payload.size }, "openai generation failed, using fallback");
+      const reason = error instanceof Error ? error.message : "openai_generation_failed";
+      return await composeFallbackBanner(payload, size, reason);
+    }
+  }
+
+  return composeFallbackBanner(payload, size, OPENAI_API_KEY ? "openai_client_unavailable" : "missing_openai_api_key");
+}
+
+async function saveBufferToGcs(
+  file: File,
+  buffer: Buffer,
+  options: SaveOptions = {},
+  attempt = 1
+): Promise<void> {
+  try {
+    await file.save(buffer, { resumable: false, ...options });
+  } catch (err) {
+    const error = err as { code?: number } & Error;
+    const code = error.code;
+    const message = error.message ?? "";
+    if (attempt < 6 && (code === 429 || code === 503 || message.includes("rateLimitExceeded"))) {
+      const waitMs = attempt * 200;
+      await new Promise((resolve) => setTimeout(resolve, waitMs));
+      await saveBufferToGcs(file, buffer, options, attempt + 1);
+      return;
+    }
+    throw err;
+  }
+}
+
+async function saveOutput(
+  result: ComposeResult,
+  payload: ComposeTaskPayload
+): Promise<{ assetPath: string; previewPath: string; metadataPath: string }> {
   const dateIso = isoUtcNow().split("T")[0];
   const pathParts = {
     brand: payload.brand,
@@ -277,12 +372,13 @@ async function saveOutput(buffer: Buffer, payload: ComposeTaskPayload): Promise<
   } as const;
 
   const objectPath = buildStoragePath(pathParts);
-  const { bucket, name } = parseGcs(`gs://${OUTPUT_BUCKET}/${objectPath}`);
-  await saveBufferToGcs(storage.bucket(bucket).file(name), buffer, { contentType: "image/png" });
+  const assetGcsPath = `gs://${OUTPUT_BUCKET}/${objectPath}`;
+  const { bucket, object } = splitGcsPath(assetGcsPath);
 
-  // Generate preview (512px width) by resizing via canvas re-render
+  await saveBufferToGcs(storage.bucket(bucket).file(object), result.buffer, { contentType: "image/png" });
+
   const tmpFile = path.join(os.tmpdir(), `banner-${Date.now()}.png`);
-  await fs.writeFile(tmpFile, buffer);
+  await fs.writeFile(tmpFile, result.buffer);
   const image = await loadImage(tmpFile);
   const ratio = image.height / image.width;
   const previewCanvas = createCanvas(512, Math.round(512 * ratio));
@@ -297,13 +393,39 @@ async function saveOutput(buffer: Buffer, payload: ComposeTaskPayload): Promise<
     }
   });
 
+  const metadataPath = `meta/${objectPath.replace(/\.png$/, "-generation.json")}`;
+  const metadataBuffer = Buffer.from(
+    JSON.stringify(
+      {
+        ...result.metadata,
+        generated_at: isoUtcNow(),
+        campaign_id: payload.campaign_id,
+        variant_id: payload.variant_id,
+        template: payload.template,
+        tone: payload.tone,
+        size: payload.size
+      },
+      null,
+      2
+    )
+  );
+  await saveBufferToGcs(storage.bucket(bucket).file(metadataPath), metadataBuffer, {
+    contentType: "application/json"
+  });
+
   return {
-    assetPath: `gs://${bucket}/${name}`,
-    previewPath: `gs://${bucket}/${previewPath}`
+    assetPath: assetGcsPath,
+    previewPath: `gs://${bucket}/${previewPath}`,
+    metadataPath: `gs://${bucket}/${metadataPath}`
   };
 }
 
-async function publishQcTask(payload: ComposeTaskPayload, assetPath: string, previewPath: string) {
+async function publishQcTask(
+  payload: ComposeTaskPayload,
+  assetPath: string,
+  previewPath: string,
+  metadataPath: string
+) {
   await pubsub.topic(QC_TOPIC).publishMessage({
     json: {
       variant_id: payload.variant_id,
@@ -313,26 +435,32 @@ async function publishQcTask(payload: ComposeTaskPayload, assetPath: string, pre
       size: payload.size,
       asset_path: assetPath,
       preview_path: previewPath,
+      generation_meta_path: metadataPath,
       copy: payload.copy
     }
   });
 }
 
-async function handleTask(payload: ComposeTaskPayload) {
-  const buffer = await composeBanner(payload);
-  const { assetPath, previewPath } = await saveOutput(buffer, payload);
+async function handleTask(payload: ComposeTaskPayload, log: FastifyBaseLogger) {
+  const result = await composeBanner(payload, log);
+  const { assetPath, previewPath, metadataPath } = await saveOutput(result, payload);
   const renderJobId = `${payload.variant_id}-${payload.size}`;
-  await firestore.collection("render_job").doc(renderJobId).set({
-    render_job_id: renderJobId,
-    variant_id: payload.variant_id,
-    size: payload.size,
-    status: "composited",
-    asset_path: assetPath,
-    preview_path: previewPath,
-    updated_at: isoUtcNow()
-  }, { merge: true });
+  await firestore.collection("render_job").doc(renderJobId).set(
+    {
+      render_job_id: renderJobId,
+      variant_id: payload.variant_id,
+      size: payload.size,
+      status: "composited",
+      asset_path: assetPath,
+      preview_path: previewPath,
+      generation_meta_path: metadataPath,
+      provider: result.metadata.provider,
+      updated_at: isoUtcNow()
+    },
+    { merge: true }
+  );
 
-  await publishQcTask(payload, assetPath, previewPath);
+  await publishQcTask(payload, assetPath, previewPath, metadataPath);
 }
 
 function decodeMessage(body: any): ComposeTaskPayload {
@@ -348,7 +476,7 @@ export function buildServer() {
   app.post("/tasks/compositor", async (request, reply) => {
     try {
       const payload = decodeMessage(request.body);
-      await handleTask(payload);
+      await handleTask(payload, request.log);
       return reply.status(204).send();
     } catch (err) {
       request.log.error({ err }, "failed to compose banner");

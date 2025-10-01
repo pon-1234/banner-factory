@@ -2,7 +2,7 @@
 
 ## Objectives
 - Accept multi-channel campaign inputs (form/CSV/JSON) and translate them into consistent banner variants.
-- Orchestrate background generation via Gemini image models and compose layered creatives with HTML/CSS rendering.
+- Render final creatives through OpenAI image models while preserving deterministic fallbacks.
 - Auto-expand to multiple aspect ratios (1:1, 4:5, 1200×628, 1080×1920) while respecting safe zones and layout rules.
 - Enforce QC/compliance gates (text legibility, forbidden claims, stat evidence) prior to delivery.
 - Deliver final assets and metadata to Slack/Notion along with audit trails and approvals.
@@ -53,47 +53,46 @@ flowchart LR
 
 ### prompt-builder (Cloud Run Job)
 - Resolves template config (T1/T2/T3) and tone/style modifiers.
-- Builds Gemini prompts and records prompt hash + references in Firestore `variant` documents.
+- Builds image prompts and records prompt hash + references in Firestore `variant` documents.
 
 ### bg-generator (Cloud Run Job)
-- Calls the Gemini Image API using Secret Manager-provided API keys (see sample below).
-- Retries up to 3 times with exponential backoff, then produces a deterministic gradient fallback.
-- Stores background image and metadata JSON in Storage.
+- Enriches prompt payloads and republishes compose tasks for each requested aspect ratio.
+- Records generation metadata (provider, timestamps) on the `variant` document in Firestore.
+- No longer creates intermediate background layers; downstream services render the final creative.
 
 ```ts
-import { GoogleGenAI } from "@google/genai";
+import OpenAI from "openai";
 import * as fs from "node:fs";
 
 async function main() {
-  const ai = new GoogleGenAI();
+  const client = new OpenAI();
+  const prompt = [
+    "Elegant Japanese financial advertisement",
+    "Tone: 緊急",
+    "Include headline: コインアシストの緊急復旧チーム",
+    "Include CTA: 今すぐ無料相談"
+  ].join("\n");
 
-  const response = await ai.models.generateContent({
-    model: "gemini-2.5-flash-image-preview",
-    contents: [
-      {
-        role: "user",
-        parts: [{ text: "Create a CoinAssist emergency recovery background" }]
-      }
-    ]
+  const response = await client.images.generate({
+    model: "gpt-image-1",
+    prompt,
+    size: "1024x1024",
+    response_format: "b64_json"
   });
 
-  const inline = response.candidates?.[0]?.content?.parts?.find((part) =>
-    Boolean((part as { inlineData?: { data: string } }).inlineData)
-  ) as { inlineData: { data: string } } | undefined;
-
-  if (inline?.inlineData?.data) {
-    const buffer = Buffer.from(inline.inlineData.data, "base64");
-    fs.writeFileSync("gemini-sample.png", buffer);
-  }
+  const base64 = response.data?.[0]?.b64_json;
+  if (!base64) return;
+  const buffer = Buffer.from(base64, "base64");
+  fs.writeFileSync("openai-banner.png", buffer);
 }
 
 void main();
 ```
 
 ### compositor (Cloud Run Job)
-- Uses headless Chromium (Puppeteer) + Sharp to compose final banners per size.
-- Applies layout rules outlined in `docs/layouts.md` with support for badges, overlays, CTA placements, disclaimers.
-- Writes outputs to Storage, updates `render_job` status.
+- Calls the OpenAI Image API (`gpt-image-1` by default) to render complete banners with integrated text.
+- Persists generation metadata JSON alongside PNG/JPEG outputs and updates `render_job` status.
+- Falls back to deterministic Canvas rendering when the API fails or the key is unavailable.
 
 ### qc-service (Cloud Run)
 - Runs text legibility checks, safe zone validation, and ensures stat claims include evidence.
@@ -136,7 +135,7 @@ void main();
 ## Security & compliance
 - Cloud Armor fronting HTTPS Load Balancer to protect public endpoints.
 - Service-to-service auth with IAM service accounts and Audience-limited OAuth tokens.
-- Secret Manager for API keys (Gemini, Slack, Notion) with automatic rotation.
+- Secret Manager for API keys (OpenAI, Slack, Notion) with automatic rotation.
 - VPC Service Controls around Storage/Firestore to prevent data exfiltration.
 
 ## Deployment pipeline
@@ -147,4 +146,4 @@ void main();
 ## Local development
 - Run individual services with `npm run dev --workspace services/<service>`.
 - Use `tasks/local/` scripts to simulate Workflows/Cloud Tasks by invoking service entrypoints sequentially.
-- Compose background generator results using stub fixtures to avoid hitting the Gemini API in dev.
+- Exercise the fallback Canvas path during local runs to avoid unnecessary OpenAI usage.

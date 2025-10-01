@@ -28,9 +28,11 @@ fi
 # Secret Managerにシークレットを登録
 echo "🔑 Secret Managerにシークレットを登録します..."
 
-GENAI_API_KEY=${GENAI_API_KEY:-${GOOGLE_API_KEY:-""}}
-echo "$GENAI_API_KEY" | gcloud secrets create google-genai-api-key --data-file=- || \
-echo "$GENAI_API_KEY" | gcloud secrets versions add google-genai-api-key --data-file=-
+OPENAI_API_KEY=${OPENAI_API_KEY:-""}
+if [ -n "$OPENAI_API_KEY" ]; then
+  echo "$OPENAI_API_KEY" | gcloud secrets create openai-api-key --data-file=- || \
+  echo "$OPENAI_API_KEY" | gcloud secrets versions add openai-api-key --data-file=-
+fi
 
 # Slack Webhook URL
 SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL:-""}
@@ -97,7 +99,13 @@ for svc in "${services[@]}"; do
 
     gcloud run services update $svc \
         --region=$REGION \
-        --set-secrets="GOOGLE_API_KEY=google-genai-api-key:latest,SLACK_WEBHOOK_URL=slack-webhook-url:latest,NOTION_API_KEY=notion-api-key:latest,NOTION_DATABASE_ID=notion-database-id:latest"
+        --set-secrets="SLACK_WEBHOOK_URL=slack-webhook-url:latest,NOTION_API_KEY=notion-api-key:latest,NOTION_DATABASE_ID=notion-database-id:latest"
 done
+
+if [ -n "$OPENAI_API_KEY" ]; then
+  gcloud run services update compositor \
+    --region=$REGION \
+    --set-secrets=OPENAI_API_KEY=openai-api-key:latest
+fi
 
 echo "✅ Secret ManagerとIAM設定が完了しました！"

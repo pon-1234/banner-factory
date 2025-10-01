@@ -137,7 +137,7 @@ gcloud firestore databases documents list --collection-group=banner-jobs
 - `REGION`: asia-northeast1
 - `REPO`: banner-factory
 - `PROJECT_ID`: banner-factory
-- `GOOGLE_API_KEY`: Secret Managerから取得（Gemini Image API）
+- `OPENAI_API_KEY`: Secret Managerから取得（OpenAI Image API）
 - `SLACK_WEBHOOK_URL`: Secret Managerから取得
 - `NOTION_TOKEN`: Secret Managerから取得
 

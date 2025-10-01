@@ -47,15 +47,13 @@ done
 Store API keys and tokens in Secret Manager and inject them into Cloud Run services:
 
 ```bash
-gcloud secrets create google-genai-api-key --data-file=- <<'EOF'
-YOUR_GEMINI_API_KEY
+gcloud secrets create openai-api-key --data-file=- <<'EOF'
+YOUR_OPENAI_API_KEY
 EOF
 
-for svc in bg-generator ingest-api compositor qc-service delivery-service; do
-  gcloud run services update ${svc} \
-    --region=${REGION} \
-    --set-secrets=GOOGLE_API_KEY=google-genai-api-key:latest
-done
+gcloud run services update compositor \
+  --region=${REGION} \
+  --set-secrets=OPENAI_API_KEY=openai-api-key:latest
 ```
 
 Similarly, create secrets for Slack webhook and Notion token, then attach them via `--set-secrets`.

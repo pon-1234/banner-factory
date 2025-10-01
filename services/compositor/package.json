@@ -15,6 +15,7 @@
     "@google-cloud/pubsub": "^4.0.0",
     "@google-cloud/storage": "^7.0.0",
     "canvas": "2.11.2",
+    "openai": "^4.31.0",
     "fastify": "4.26.2",
     "pino": "8.17.0"
   },

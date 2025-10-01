@@ -13,14 +13,10 @@
     "@banner/shared": "file:./packages/shared",
     "@google-cloud/firestore": "^7.0.0",
     "@google-cloud/pubsub": "^4.0.0",
-    "@google-cloud/storage": "^7.0.0",
-    "@google/genai": "^1.21.0",
     "fastify": "4.26.2",
-    "pino": "8.17.0",
-    "pngjs": "^7.0.0"
+    "pino": "8.17.0"
   },
   "devDependencies": {
-    "@types/pngjs": "^6.0.5",
     "tsx": "4.7.1",
     "typescript": "5.4.5"
   }

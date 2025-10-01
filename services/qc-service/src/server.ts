@@ -14,6 +14,7 @@ const DELIVERY_TOPIC = process.env.DELIVERY_TOPIC ?? "delivery-tasks";
 
 interface QCTaskPayload extends Omit<DeliveryMessage, "preview_url"> {
   preview_path: string;
+  generation_meta_path?: string;
   copy: {
     headline: string;
     sub?: string;

@@ -84,7 +84,9 @@ export const VariantSchema = z.object({
   style_code: z.enum(["T1", "T2", "T3"]),
   prompt_hash: z.string(),
   refs_hash: z.string().optional(),
-  bg_asset_path: z.string().optional(),
+  bg_asset_path: z.string().nullable().optional(),
+  bg_meta_path: z.string().nullable().optional(),
+  background_provider: z.string().optional(),
   created_at: z.string()
 });
 
