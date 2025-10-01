@@ -128,11 +128,12 @@ module "cloud_run_services" {
       secret_version = "latest"
     }
   } : {}
-  ingress        = "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER"
-  min_instances  = 0
-  max_instances  = 5
-  cpu_throttling = true
-  labels         = local.labels
+  ingress                = each.key == "ingest-api" ? "INGRESS_TRAFFIC_ALL" : "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER"
+  allow_unauthenticated  = each.key == "ingest-api" ? true : false
+  min_instances          = 0
+  max_instances          = 5
+  cpu_throttling         = true
+  labels                 = local.labels
 }
 
 module "campaign_portal_service" {

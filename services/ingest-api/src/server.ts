@@ -1,4 +1,5 @@
 import Fastify from "fastify";
+import cors from "@fastify/cors";
 import { Firestore } from "@google-cloud/firestore";
 import { PubSub } from "@google-cloud/pubsub";
 import { InputSchema, RenderRequestSchema, createHashId, isoUtcNow } from "@banner/shared";
@@ -6,11 +7,15 @@ import { InputSchema, RenderRequestSchema, createHashId, isoUtcNow } from "@bann
 const firestore = new Firestore();
 const pubsub = new PubSub();
 
-const RENDER_TOPIC = process.env.RENDER_TOPIC ?? "render-requests";
+const BG_TOPIC = process.env.BG_TOPIC ?? "bg-tasks";
 
-export function buildServer() {
+export async function buildServer() {
   const app = Fastify({
     logger: true
+  });
+
+  await app.register(cors, {
+    origin: true
   });
 
   app.get("/", async (request, reply) => {
@@ -52,7 +57,7 @@ export function buildServer() {
 
     const renderRequest = parsed.data;
 
-    const messageId = await pubsub.topic(RENDER_TOPIC).publishMessage({
+    const messageId = await pubsub.topic(BG_TOPIC).publishMessage({
       json: renderRequest
     });
 
@@ -82,7 +87,7 @@ export function buildServer() {
 if (require.main === module) {
   const port = Number(process.env.PORT ?? 8080);
   buildServer()
-    .listen({ port, host: "0.0.0.0" })
+    .then(app => app.listen({ port, host: "0.0.0.0" }))
     .catch((err) => {
       console.error(err);
       process.exit(1);

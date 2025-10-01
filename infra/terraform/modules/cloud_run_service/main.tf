@@ -52,6 +52,11 @@ variable "secrets" {
   default = {}
 }
 
+variable "allow_unauthenticated" {
+  type    = bool
+  default = false
+}
+
 resource "google_cloud_run_v2_service" "service" {
   name     = var.service_name
   location = var.region
@@ -95,6 +100,14 @@ resource "google_cloud_run_v2_service" "service" {
       }
     }
   }
+}
+
+resource "google_cloud_run_v2_service_iam_member" "public_access" {
+  count    = var.allow_unauthenticated ? 1 : 0
+  name     = google_cloud_run_v2_service.service.name
+  location = google_cloud_run_v2_service.service.location
+  role     = "roles/run.invoker"
+  member   = "allUsers"
 }
 
 output "uri" {
