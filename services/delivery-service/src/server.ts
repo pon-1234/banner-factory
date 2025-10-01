@@ -62,9 +62,13 @@ async function markDelivered(payload: ReturnType<typeof DeliveryMessageSchema.pa
   const renderJobId = `${payload.variant_id}-${payload.size}`;
   await firestore.collection("render_job").doc(renderJobId).set({
     render_job_id: renderJobId,
+    campaign_id: payload.campaign_id,
+    variant_id: payload.variant_id,
+    size: payload.size,
     delivered_at: isoUtcNow(),
     status: "delivered",
-    delivery_preview_url: payload.preview_url
+    preview_url: payload.preview_url,
+    updated_at: isoUtcNow()
   }, { merge: true });
   await firestore.collection("delivery_log").doc(renderJobId).set({
     ...payload,

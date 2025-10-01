@@ -102,10 +102,14 @@ async function recordResult(payload: QCTaskPayload, reportPath: string, result: 
   const renderJobId = `${payload.variant_id}-${payload.size}`;
   await firestore.collection("render_job").doc(renderJobId).set({
     render_job_id: renderJobId,
+    campaign_id: payload.campaign_id,
+    variant_id: payload.variant_id,
+    size: payload.size,
     qc_passed: result.passed,
     qc_issues: result.issues,
     qc_report_path: reportPath,
     status: result.passed ? "qc_passed" : "manual_review",
+    qc_completed_at: isoUtcNow(),
     updated_at: isoUtcNow()
   }, { merge: true });
 }

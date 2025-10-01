@@ -108,6 +108,7 @@ void main();
 - Next.js front-end for internal teams to submit campaign briefs.
 - Calls `ingest-api` via the `NEXT_PUBLIC_INGEST_API_BASE_URL` environment variable.
 - Served publicly via Cloud Run with static assets generated at build time.
+- Includes `/campaign/[campaignId]/progress` dashboard to inspect render statuses and previews sourced from Firestore.
 
 ## Storage layout
 ```
@@ -123,7 +124,7 @@ void main();
 - `campaign`: brand, lp_url, objective, style_code, created_at, status, approvals.
 - `template`: template_code, layout JSON (grid, safe zones, text styles), updated_at.
 - `variant`: campaign_id, template_code, tone, prompt_hash, refs_hash, bg_asset_path.
-- `render_job`: variant_id, size, status, qc_findings, retries.
+- `render_job`: campaign_id, variant_id, size, status (`queued`→`processing`→`composited`→`qc_passed`→`delivered`), asset/preview URLs, generation metadata, QC findings.
 - `asset`: render_job_id, storage_path, preview_url, qc_passed.
 - `evidence`: stat_claim_id, url, note, verified_by, verified_at.
 

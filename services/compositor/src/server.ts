@@ -359,10 +359,18 @@ async function saveBufferToGcs(
   }
 }
 
+function toPublicUrl(gcsPath: string | null | undefined): string | null {
+  if (!gcsPath) {
+    return null;
+  }
+  const { bucket, object } = splitGcsPath(gcsPath);
+  return `https://storage.googleapis.com/${bucket}/${object}`;
+}
+
 async function saveOutput(
   result: ComposeResult,
   payload: ComposeTaskPayload
-): Promise<{ assetPath: string; previewPath: string; metadataPath: string }> {
+): Promise<{ assetPath: string; assetUrl: string | null; previewPath: string; previewUrl: string | null; metadataPath: string }> {
   const dateIso = isoUtcNow().split("T")[0];
   const pathParts = {
     brand: payload.brand,
@@ -417,9 +425,13 @@ async function saveOutput(
     contentType: "application/json"
   });
 
+  const previewGcsPath = `gs://${bucket}/${previewPath}`;
+
   return {
     assetPath: assetGcsPath,
-    previewPath: `gs://${bucket}/${previewPath}`,
+    assetUrl: toPublicUrl(assetGcsPath),
+    previewPath: previewGcsPath,
+    previewUrl: toPublicUrl(previewGcsPath),
     metadataPath: `gs://${bucket}/${metadataPath}`
   };
 }
@@ -446,19 +458,55 @@ async function publishQcTask(
 }
 
 async function handleTask(payload: ComposeTaskPayload, log: FastifyBaseLogger) {
-  const result = await composeBanner(payload, log);
-  const { assetPath, previewPath, metadataPath } = await saveOutput(result, payload);
   const renderJobId = `${payload.variant_id}-${payload.size}`;
   await firestore.collection("render_job").doc(renderJobId).set(
     {
       render_job_id: renderJobId,
+      campaign_id: payload.campaign_id,
+      variant_id: payload.variant_id,
+      size: payload.size,
+      status: "processing",
+      prompt: payload.prompt,
+      seed: payload.seed,
+      processing_started_at: isoUtcNow(),
+      updated_at: isoUtcNow()
+    },
+    { merge: true }
+  );
+
+  let result: ComposeResult;
+  try {
+    result = await composeBanner(payload, log);
+  } catch (error) {
+    await firestore.collection("render_job").doc(renderJobId).set(
+      {
+        render_job_id: renderJobId,
+        status: "failed",
+        error_message: error instanceof Error ? error.message : String(error),
+        updated_at: isoUtcNow()
+      },
+      { merge: true }
+    );
+    throw error;
+  }
+
+  const { assetPath, assetUrl, previewPath, previewUrl, metadataPath } = await saveOutput(result, payload);
+  await firestore.collection("render_job").doc(renderJobId).set(
+    {
+      render_job_id: renderJobId,
+      campaign_id: payload.campaign_id,
       variant_id: payload.variant_id,
       size: payload.size,
       status: "composited",
-      asset_path: assetPath,
-      preview_path: previewPath,
-      generation_meta_path: metadataPath,
       provider: result.metadata.provider,
+      prompt: payload.prompt,
+      seed: payload.seed,
+      asset_path: assetPath,
+      asset_url: assetUrl,
+      preview_path: previewPath,
+      preview_url: previewUrl,
+      generation_meta_path: metadataPath,
+      composited_at: isoUtcNow(),
       updated_at: isoUtcNow()
     },
     { merge: true }

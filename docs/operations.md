@@ -56,6 +56,7 @@
 
 ## API & Integration Tasks
 - Document and solidify ingestion API contract (request schema, auth, error codes) in `docs/architecture.md` or a dedicated spec.
+- New dashboard endpoint: `GET /v1/campaigns/:campaignId/progress` (ingest-api) surfaces per-variant render job status and preview URLs for portal use.
 - Align internal service APIs with shared schemas; add response schema utilities to `packages/shared` as needed.
 - Verify Slack and Notion integrations in `delivery-service`:
   - Slack Webhook URL managed via Secret Manager; test message formatting and approval flow.

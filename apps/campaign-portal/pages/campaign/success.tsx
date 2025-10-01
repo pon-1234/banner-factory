@@ -44,7 +44,12 @@ export default function CampaignSuccessPage() {
         </Alert>
 
         <Stack direction={{ base: "column", md: "row" }} spacing={4} justify="center">
-          <Button as={Link} href="/campaign/render" colorScheme="blue">
+          {id ? (
+            <Button as={Link} href={`/campaign/${id}/progress`} colorScheme="blue">
+              進捗ダッシュボードを開く
+            </Button>
+          ) : null}
+          <Button as={Link} href="/campaign/render" variant="outline">
             レンダー依頼に進む
           </Button>
           <Button as={Link} href="/campaign/new" variant="ghost">

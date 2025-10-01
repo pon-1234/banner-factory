@@ -92,12 +92,49 @@ export const VariantSchema = z.object({
 
 export type VariantRecord = z.infer<typeof VariantSchema>;
 
+export const RenderJobStatusSchema = z.enum([
+  "queued",
+  "processing",
+  "composited",
+  "qc_passed",
+  "manual_review",
+  "delivered",
+  "failed"
+]);
+
+export type RenderJobStatus = z.infer<typeof RenderJobStatusSchema>;
+
 export const RenderJobSchema = z.object({
   render_job_id: z.string(),
+  campaign_id: z.string().optional(),
   variant_id: z.string(),
   size: AspectRatioSchema,
-  status: z.enum(["pending", "running", "succeeded", "failed", "manual_review"]),
-  qc_findings: z.array(z.string()).optional(),
+  status: RenderJobStatusSchema,
+  provider: z.string().optional(),
+  prompt: z.string().optional(),
+  seed: z.string().optional(),
+  asset_path: z.string().nullable().optional(),
+  asset_url: z.string().url().nullable().optional(),
+  preview_path: z.string().nullable().optional(),
+  preview_url: z.string().url().nullable().optional(),
+  generation_meta_path: z.string().nullable().optional(),
+  qc_passed: z.boolean().optional(),
+  qc_report_path: z.string().nullable().optional(),
+  qc_issues: z
+    .array(
+      z.object({
+        code: z.string(),
+        severity: z.enum(["warning", "error"]),
+        message: z.string()
+      })
+    )
+    .optional(),
+  error_message: z.string().optional(),
+  queued_at: z.string().optional(),
+  processing_started_at: z.string().optional(),
+  composited_at: z.string().optional(),
+  qc_completed_at: z.string().optional(),
+  delivered_at: z.string().optional(),
   retries: z.number().int().min(0).default(0),
   updated_at: z.string()
 });

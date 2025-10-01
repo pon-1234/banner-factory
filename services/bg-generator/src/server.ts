@@ -16,7 +16,7 @@ interface BgTaskPayload {
   prompt: string;
   seed: string;
   refs?: string[];
-  sizes: AspectRatio[];
+  sizes?: AspectRatio[];
   brand: string;
   slug: string;
   copy: {
@@ -29,8 +29,38 @@ interface BgTaskPayload {
   };
 }
 
+function normalizeSizes(sizes: AspectRatio[] | undefined): AspectRatio[] {
+  const fallback: AspectRatio[] = ["1080x1080"];
+  if (!Array.isArray(sizes) || sizes.length === 0) {
+    return fallback;
+  }
+  const filtered = sizes.filter((value): value is AspectRatio => typeof value === "string" && value.length > 0);
+  return filtered.length ? filtered : fallback;
+}
+
 async function publishComposeTasks(payload: BgTaskPayload) {
-  for (const size of payload.sizes) {
+  const sizes = normalizeSizes(payload.sizes);
+  for (const size of sizes) {
+    const renderJobId = `${payload.variant_id}-${size}`;
+    await firestore
+      .collection("render_job")
+      .doc(renderJobId)
+      .set(
+        {
+          render_job_id: renderJobId,
+          campaign_id: payload.campaign_id,
+          variant_id: payload.variant_id,
+          size,
+          status: "queued",
+          provider: "openai-image-api",
+          prompt: payload.prompt,
+          seed: payload.seed,
+          queued_at: isoUtcNow(),
+          updated_at: isoUtcNow()
+        },
+        { merge: true }
+      );
+
     await pubsub.topic(COMPOSE_TOPIC).publishMessage({
       json: {
         variant_id: payload.variant_id,
