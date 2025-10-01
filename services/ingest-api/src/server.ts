@@ -13,6 +13,10 @@ export function buildServer() {
     logger: true
   });
 
+  app.get("/", async (request, reply) => {
+    return reply.send({ status: "ok", service: "ingest-api" });
+  });
+
   app.post("/v1/campaigns", async (request, reply) => {
     const parsed = InputSchema.safeParse(request.body);
     if (!parsed.success) {
