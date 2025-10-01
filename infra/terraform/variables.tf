@@ -70,3 +70,15 @@ variable "notification_channels" {
   description = "Monitoring notification channels"
   default     = []
 }
+
+variable "manage_render_workflow" {
+  type        = bool
+  description = "Whether Terraform should manage the render orchestrator workflow"
+  default     = false
+}
+
+variable "manage_cloud_run_services" {
+  type        = bool
+  description = "Whether Terraform should manage Cloud Run services (set to true for full infra control)"
+  default     = false
+}

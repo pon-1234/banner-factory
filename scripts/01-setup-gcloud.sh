@@ -8,18 +8,22 @@ set -e
 echo "🚀 Banner Factory デプロイセットアップを開始します..."
 
 # 環境変数の設定
-export REGION="asia-northeast1"
-export REPO="banner-factory"
-export PROJECT_ID="banner-factory"
+export REGION="${REGION:-asia-northeast1}"
+export REPO="${REPO:-banner-factory}"
+export PROJECT_ID="${PROJECT_ID:-banner-factory}"
 
 echo "📋 環境変数:"
 echo "  REGION: $REGION"
 echo "  REPO: $REPO"
 echo "  PROJECT_ID: $PROJECT_ID"
 
-# gcloud認証
-echo "🔐 gcloud認証を実行します..."
-gcloud auth login
+ACTIVE_ACCOUNT=$(gcloud auth list --filter=status:ACTIVE --format="value(account)" 2>/dev/null || true)
+if [ -z "$ACTIVE_ACCOUNT" ]; then
+  echo "🔐 gcloud認証を実行します..."
+  gcloud auth login
+else
+  echo "🔐 既に認証済み: $ACTIVE_ACCOUNT"
+fi
 
 # プロジェクト設定
 echo "⚙️ プロジェクトを設定します..."
@@ -41,7 +45,7 @@ gcloud services enable \
   monitoring.googleapis.com
 
 # Firestoreの初期化
-echo "🗄️ Firestoreをネイティブモードで初期化します..."
-gcloud firestore databases create --location=$REGION --type=firestore-native
+echo "🗄️ Firestoreをネイティブモードで初期化します... (存在する場合はスキップ)"
+gcloud firestore databases create --location=$REGION --type=firestore-native || echo "Firestore は既に初期化済み"
 
 echo "✅ gcloudセットアップが完了しました！"

@@ -32,14 +32,22 @@ function decodeMessage(body: any): QCTaskPayload {
   return JSON.parse(decoded) as QCTaskPayload;
 }
 
+function splitGcsPath(gcsPath: string): { bucket: string; object: string } {
+  const match = gcsPath.match(/^gs:\/\/([^/]+)\/(.+)$/);
+  if (!match) {
+    throw new Error(`invalid GCS path: ${gcsPath}`);
+  }
+  return { bucket: match[1], object: match[2] };
+}
+
 function parseGcsPath(gcsPath: string) {
-  const [, bucket, ...objectParts] = gcsPath.split("/");
-  return { bucket, name: objectParts.join("/") };
+  const { bucket, object } = splitGcsPath(gcsPath);
+  return { bucket, name: object };
 }
 
 async function downloadImage(gcsPath: string): Promise<Buffer> {
-  const { bucket, name } = parseGcsPath(gcsPath);
-  const [data] = await storage.bucket(bucket).file(name).download();
+  const { bucket, object } = splitGcsPath(gcsPath);
+  const [data] = await storage.bucket(bucket).file(object).download();
   return data;
 }
 
@@ -75,8 +83,9 @@ async function runChecks(payload: QCTaskPayload): Promise<{ passed: boolean; iss
 }
 
 async function saveQcReport(payload: QCTaskPayload, result: Awaited<ReturnType<typeof runChecks>>) {
-  const { bucket, name } = parseGcsPath(payload.asset_path);
-  const reportPath = `meta/${payload.variant_id}-${payload.size}-qc.json`;
+  const { bucket } = parseGcsPath(payload.asset_path);
+  const timestamp = isoUtcNow().replace(/[:.]/g, "-");
+  const reportPath = `meta/${payload.variant_id}-${payload.size}-${timestamp}-qc.json`;
   const content = Buffer.from(JSON.stringify({
     render_job_id: `${payload.variant_id}-${payload.size}`,
     issues: result.issues,
@@ -84,7 +93,7 @@ async function saveQcReport(payload: QCTaskPayload, result: Awaited<ReturnType<t
     ocr_text: result.textDetected,
     generated_at: isoUtcNow()
   }, null, 2));
-  await storage.bucket(bucket).file(reportPath).save(content, { contentType: "application/json" });
+  await storage.bucket(bucket).file(reportPath).save(content, { contentType: "application/json", resumable: false });
   return `gs://${bucket}/${reportPath}`;
 }
 

@@ -65,7 +65,7 @@ async function upsertVariant(context: VariantContext): Promise<VariantResult> {
   const brandSlug = slugify(context.input.brand_name);
 
   const variantRef = firestore.collection("variant").doc(variantId);
-  await variantRef.set({
+  const baseData: any = {
     variant_id: variantId,
     campaign_id: context.campaignId,
     template: context.template,
@@ -75,13 +75,16 @@ async function upsertVariant(context: VariantContext): Promise<VariantResult> {
     prompt_hash: promptHash,
     seed,
     refs: context.refs ?? [],
-    refs_hash: refsHash,
     copy,
     sizes: context.sizes,
     brand: context.input.brand_name,
     slug: brandSlug,
     created_at: isoUtcNow()
-  });
+  };
+  if (refsHash) {
+    baseData.refs_hash = refsHash;
+  }
+  await variantRef.set(baseData);
 
   await variantRef.collection("logs").add({
     event: "prompt_generated",

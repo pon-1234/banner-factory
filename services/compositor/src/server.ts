@@ -65,19 +65,23 @@ interface ComposeTaskPayload {
   copy: CopyPayload;
 }
 
-async function downloadFromGcs(gcsPath: string): Promise<Buffer> {
-  if (!gcsPath.startsWith("gs://")) {
-    throw new Error(`background path must be gs://, got ${gcsPath}`);
+function splitGcsPath(gcsPath: string): { bucket: string; object: string } {
+  const match = gcsPath.match(/^gs:\/\/([^/]+)\/(.+)$/);
+  if (!match) {
+    throw new Error(`invalid GCS path: ${gcsPath}`);
   }
-  const [, bucket, ...objectParts] = gcsPath.split("/");
-  const objectName = objectParts.join("/");
-  const [file] = await storage.bucket(bucket).file(objectName).download();
+  return { bucket: match[1], object: match[2] };
+}
+
+async function downloadFromGcs(gcsPath: string): Promise<Buffer> {
+  const { bucket, object } = splitGcsPath(gcsPath);
+  const [file] = await storage.bucket(bucket).file(object).download();
   return file;
 }
 
 function parseGcs(gcsPath: string) {
-  const [, bucket, ...objectParts] = gcsPath.split("/");
-  return { bucket, name: objectParts.join("/") };
+  const { bucket, object } = splitGcsPath(gcsPath);
+  return { bucket, name: object };
 }
 
 async function composeBanner(payload: ComposeTaskPayload): Promise<Buffer> {

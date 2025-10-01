@@ -5,9 +5,9 @@ import { DeliveryMessageSchema, isoUtcNow } from "@banner/shared";
 
 const firestore = new Firestore();
 
-const SLACK_WEBHOOK_URL = process.env.SLACK_WEBHOOK_URL ?? "";
-const NOTION_API_KEY = process.env.NOTION_API_KEY ?? "";
-const NOTION_DATABASE_ID = process.env.NOTION_DATABASE_ID ?? "";
+const SLACK_WEBHOOK_URL = (process.env.SLACK_WEBHOOK_URL ?? "").trim();
+const NOTION_API_KEY = (process.env.NOTION_API_KEY ?? "").trim();
+const NOTION_DATABASE_ID = (process.env.NOTION_DATABASE_ID ?? "").trim();
 
 async function postToSlack(payload: ReturnType<typeof DeliveryMessageSchema.parse>) {
   if (!SLACK_WEBHOOK_URL) {

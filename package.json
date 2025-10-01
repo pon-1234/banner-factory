@@ -5,12 +5,14 @@
   "description": "Automated banner generation pipeline on GCP",
   "workspaces": [
     "packages/*",
-    "services/*"
+    "services/*",
+    "apps/*"
   ],
   "scripts": {
     "lint": "eslint \"**/*.{ts,tsx}\" --max-warnings=0",
     "build": "turbo run build",
-    "test": "turbo run test"
+    "test": "turbo run test",
+    "dev:portal": "npm run dev --workspace @banner/campaign-portal"
   },
   "devDependencies": {
     "@typescript-eslint/eslint-plugin": "7.5.0",

@@ -22,7 +22,7 @@ main:
                     - buildVariant:
                         call: http.post
                         args:
-                          url: ${"https://" + env["PROMPT_BUILDER_HOST"] + "/workflows/variants"}
+                          url: ${sys.get_env("PROMPT_BUILDER_HOST") + "/workflows/variants"}
                           auth:
                             type: OIDC
                           body:
@@ -31,23 +31,30 @@ main:
                             variant_index: ${idx}
                             request: ${request}
                         result: variantResponse
+                    - prepareBackgroundMessage:
+                        assign:
+                          - backgroundMessage:
+                              variant_id: ${variantResponse.body.variant_id}
+                              campaign_id: ${campaignId}
+                              template: ${template}
+                              tone: ${variantResponse.body.tone}
+                              prompt: ${variantResponse.body.prompt}
+                              seed: ${variantResponse.body.seed}
+                              refs: ${variantResponse.body.refs}
+                              sizes: ${variantResponse.body.sizes}
+                              brand: ${variantResponse.body.brand}
+                              slug: ${variantResponse.body.slug}
+                              copy: ${variantResponse.body.copy}
+                          - backgroundMessageBytes: ${json.encode(backgroundMessage)}
+                          - backgroundMessageEncoded: ${base64.encode(backgroundMessageBytes)}
                     - enqueueBackground:
-                        call: pubsub.projects.topics.publish
+                        call: http.post
                         args:
-                          topic: ${"projects/" + sys.get_env("GCP_PROJECT") + "/topics/" + env["BG_TOPIC"]}
+                          url: ${"https://pubsub.googleapis.com/v1/projects/" + sys.get_env("PROJECT_ID") + "/topics/" + sys.get_env("BG_TOPIC") + ":publish"}
+                          auth:
+                            type: OAuth2
                           body:
                             messages:
-                              - json:
-                                  variant_id: ${variantResponse.body.variant_id}
-                                  campaign_id: ${campaignId}
-                                  template: ${template}
-                                  tone: ${variantResponse.body.tone}
-                                  prompt: ${variantResponse.body.prompt}
-                                  seed: ${variantResponse.body.seed}
-                                  refs: ${variantResponse.body.refs}
-                                  sizes: ${variantResponse.body.sizes}
-                                  brand: ${variantResponse.body.brand}
-                                  slug: ${variantResponse.body.slug}
-                                  copy: ${variantResponse.body.copy}
+                              - data: ${backgroundMessageEncoded}
     - return:
         return: { status: "queued" }

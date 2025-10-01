@@ -9,6 +9,9 @@ const firestore = new Firestore();
 const pubsub = new PubSub();
 
 const NANO_ENDPOINT = process.env.NANO_BANANA_ENDPOINT ?? "https://api.nano-banana.invalid";
+// Gemini 切り替え用: GOOGLE_API_KEY がある場合はそれを優先（無ければ NANO_BANANA_API_KEY を流用）
+const BG_PROVIDER = (process.env.BG_PROVIDER ?? "").toLowerCase();
+const GOOGLE_API_KEY = process.env.GOOGLE_API_KEY || process.env.NANO_BANANA_API_KEY || "";
 const API_KEY = process.env.NANO_BANANA_API_KEY ?? "";
 const OUTPUT_BUCKET = process.env.OUTPUT_BUCKET ?? "banner-assets";
 const COMPOSE_TOPIC = process.env.COMPOSE_TOPIC ?? "compose-tasks";
@@ -40,7 +43,7 @@ interface NanoBananaResponse {
   metadata: Record<string, unknown> & { seed_like?: string; prompt: string };
 }
 
-async function fetchBackground(payload: BgTaskPayload, attempt: number): Promise<NanoBananaResponse> {
+async function fetchBackgroundNano(payload: BgTaskPayload, attempt: number): Promise<NanoBananaResponse> {
   const res = await fetch(`${NANO_ENDPOINT}/bg/generate`, {
     method: "POST",
     headers: {
@@ -63,6 +66,48 @@ async function fetchBackground(payload: BgTaskPayload, attempt: number): Promise
   return (await res.json()) as NanoBananaResponse;
 }
 
+async function fetchBackgroundGemini(payload: BgTaskPayload, attempt: number): Promise<{ buffer: Buffer; metadata: Record<string, unknown> }> {
+  if (!GOOGLE_API_KEY) {
+    throw new Error("GOOGLE_API_KEY (or NANO_BANANA_API_KEY) is required for Gemini background generation");
+  }
+  // Google AI API (Generative Language) REST 呼び出し
+  const model = "gemini-2.5-flash-image-preview";
+  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(GOOGLE_API_KEY)}`;
+  const body = {
+    contents: [
+      {
+        role: "user",
+        parts: [{ text: payload.prompt }]
+      }
+    ]
+  };
+  const res = await fetch(endpoint, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`gemini generateContent failed (${res.status}): ${text} attempt=${attempt}`);
+  }
+  const json = (await res.json()) as any;
+  const candidates = json.candidates || [];
+  const parts = candidates[0]?.content?.parts || [];
+  const inline = parts.find((p: any) => p.inlineData || p.inline_data)?.inlineData || parts.find((p: any) => p.inline_data)?.inline_data;
+  if (!inline?.data) {
+    throw new Error("gemini response missing inline image data");
+  }
+  const buffer = Buffer.from(inline.data, "base64");
+  const metadata = {
+    provider: "gemini",
+    model,
+    prompt: payload.prompt,
+    seed_like: payload.seed,
+    refs: payload.refs ?? []
+  } as const;
+  return { buffer, metadata };
+}
+
 async function downloadImage(url: string): Promise<Buffer> {
   const res = await fetch(url);
   if (!res.ok) {
@@ -78,7 +123,7 @@ async function saveBackground(buffer: Buffer, path: string) {
   return `gs://${OUTPUT_BUCKET}/${path}`;
 }
 
-async function saveMetadata(path: string, metadata: NanoBananaResponse["metadata"]) {
+async function saveMetadata(path: string, metadata: Record<string, unknown>) {
   const metaPath = path.replace(/\.png$/, ".json");
   const file = storage.bucket(OUTPUT_BUCKET).file(metaPath);
   await file.save(Buffer.from(JSON.stringify(metadata, null, 2)), { contentType: "application/json" });
@@ -115,14 +160,24 @@ async function publishComposeTasks(payload: BgTaskPayload, assetPath: string, me
 
 async function handleTask(payload: BgTaskPayload) {
   let lastError: unknown;
+  const useGemini = BG_PROVIDER === "gemini" || (!!GOOGLE_API_KEY && (!process.env.NANO_BANANA_ENDPOINT || process.env.NANO_BANANA_ENDPOINT.includes("invalid")));
   for (let attempt = 1; attempt <= 3; attempt += 1) {
     try {
-      const response = await fetchBackground(payload, attempt);
-      const buffer = await downloadImage(response.image_url);
+      let buffer: Buffer;
+      let meta: Record<string, unknown> = {};
+      if (useGemini) {
+        const result = await fetchBackgroundGemini(payload, attempt);
+        buffer = result.buffer;
+        meta = result.metadata;
+      } else {
+        const response = await fetchBackgroundNano(payload, attempt);
+        buffer = await downloadImage(response.image_url);
+        meta = response.metadata;
+      }
       const dateFragment = isoUtcNow().split("T")[0];
       const storagePath = `backgrounds/${payload.campaign_id}/${dateFragment}/${payload.variant_id}-${createHashId("bg", payload.seed, 8)}.png`;
       const assetPath = await saveBackground(buffer, storagePath);
-      const metadataPath = await saveMetadata(storagePath, response.metadata);
+      const metadataPath = await saveMetadata(storagePath, meta);
 
       await firestore.collection("variant").doc(payload.variant_id).update({
         bg_asset_path: assetPath,

@@ -10,9 +10,7 @@ echo "🚀 Banner Factory デプロイを開始します..."
 chmod +x scripts/*.sh
 
 # 1. 依存セットアップ
-echo "📦 依存関係をセットアップします..."
-npm install
-npm run build
+echo "📦 依存関係のローカルインストールはスキップします (Cloud Buildでビルド)"
 
 # 2. gcloud認証とプロジェクト設定
 echo "🔐 gcloud認証とプロジェクト設定を実行します..."
@@ -20,7 +18,9 @@ echo "🔐 gcloud認証とプロジェクト設定を実行します..."
 
 # 3. Terraformによる基盤構築
 echo "🏗️ Terraformによる基盤構築を実行します..."
-./scripts/02-terraform-deploy.sh
+if ! ./scripts/02-terraform-deploy.sh; then
+  echo "⚠️ Terraform でいくつかのリソース作成が失敗しました (既存リソース等)。後続ステップを継続します。"
+fi
 
 # 4. コンテナビルド＆デプロイ
 echo "🐳 コンテナビルド＆デプロイを実行します..."

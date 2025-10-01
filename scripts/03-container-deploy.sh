@@ -5,9 +5,9 @@
 set -e
 
 # 環境変数の設定
-export REGION="asia-northeast1"
-export REPO="banner-factory"
-export PROJECT_ID="banner-factory"
+export REGION="${REGION:-asia-northeast1}"
+export REPO="${REPO:-banner-factory}"
+export PROJECT_ID="${PROJECT_ID:-banner-factory}"
 
 echo "🐳 コンテナビルド＆デプロイを開始します..."
 
@@ -18,17 +18,15 @@ gcloud artifacts repositories create $REPO \
   --location=$REGION \
   --description="Banner Factory container images" || echo "リポジトリは既に存在します"
 
-# 依存関係のインストールとビルド
-echo "📦 依存関係をインストールしてビルドします..."
-npm install
-npm run build
+# 依存関係のローカルインストールは不要（Cloud Build 内で実行）
+echo "📦 ローカルの npm インストール/ビルドはスキップします"
 
 # 各サービスのビルドとデプロイ
 services=("ingest-api" "prompt-builder" "bg-generator" "compositor" "qc-service" "delivery-service")
 
 for svc in "${services[@]}"; do
     echo "🔨 $svc をビルドしています..."
-    sa_account=$(echo "$svc" | tr '-' '_')
+    sa_account="$svc"
     
     # コンテナイメージのビルド（プロジェクトルートからビルドコンテキストを設定）
     cat > /tmp/cloudbuild-${svc}.yaml <<EOF

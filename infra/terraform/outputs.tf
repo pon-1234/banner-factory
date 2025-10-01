@@ -15,10 +15,15 @@ output "pubsub_topics" {
   }
 }
 
+output "pubsub_push_subscriptions" {
+  value = { for key, sub in google_pubsub_subscription.push : key => sub.name }
+}
+
 output "service_accounts" {
   value = google_service_account.services[*].email
 }
 
 output "workflows_render_id" {
-  value = google_workflows_workflow.render.name
+  value       = try(google_workflows_workflow.render[0].name, null)
+  description = "Render orchestrator workflow name when managed"
 }
