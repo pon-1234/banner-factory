@@ -24,6 +24,7 @@ DELIVERY_TOPIC="delivery-tasks"
 # Terraform の出力からバケット名を取得（失敗時はデフォルト）
 ASSET_BUCKET="$(cd infra/terraform && terraform output -raw asset_bucket 2>/dev/null || echo "banner-assets")"
 STOCK_BUCKET="$(cd infra/terraform && terraform output -raw stock_background_bucket 2>/dev/null || echo "banner-stock-backgrounds")"
+BG_MODEL=${BG_MODEL:-$(cd infra/terraform && terraform output -raw background_model 2>/dev/null || echo "gemini-2.5-flash-image-preview")}
 
 # 各サービスに環境変数を設定
 services=("ingest-api" "prompt-builder" "bg-generator" "compositor" "qc-service" "delivery-service")
@@ -33,7 +34,7 @@ for svc in "${services[@]}"; do
     
     gcloud run services update $svc \
         --region=$REGION \
-        --update-env-vars="PROMPT_BUILDER_HOST=$PROMPT_BUILDER_HOST,BG_TOPIC=$BG_TOPIC,COMPOSE_TOPIC=$COMPOSE_TOPIC,QC_TOPIC=$QC_TOPIC,DELIVERY_TOPIC=$DELIVERY_TOPIC,OUTPUT_BUCKET=$ASSET_BUCKET,STOCK_BUCKET=$STOCK_BUCKET,BG_PROVIDER=gemini"
+        --update-env-vars="PROMPT_BUILDER_HOST=$PROMPT_BUILDER_HOST,BG_TOPIC=$BG_TOPIC,COMPOSE_TOPIC=$COMPOSE_TOPIC,QC_TOPIC=$QC_TOPIC,DELIVERY_TOPIC=$DELIVERY_TOPIC,OUTPUT_BUCKET=$ASSET_BUCKET,STOCK_BUCKET=$STOCK_BUCKET,BG_MODEL=$BG_MODEL"
 done
 
 # Workflows サービスアカウントの設定

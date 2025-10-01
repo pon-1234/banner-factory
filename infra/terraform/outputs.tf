@@ -20,10 +20,23 @@ output "pubsub_push_subscriptions" {
 }
 
 output "service_accounts" {
-  value = google_service_account.services[*].email
+  value = concat(
+    [for account in google_service_account.services : account.email],
+    [google_service_account.campaign_portal.email]
+  )
 }
 
 output "workflows_render_id" {
   value       = try(google_workflows_workflow.render[0].name, null)
   description = "Render orchestrator workflow name when managed"
+}
+
+output "background_model" {
+  value       = var.background_model
+  description = "Gemini image model used for background generation"
+}
+
+output "campaign_portal_url" {
+  value       = var.deploy_campaign_portal ? module.campaign_portal_service[0].uri : null
+  description = "Public URL for the campaign portal Cloud Run service"
 }

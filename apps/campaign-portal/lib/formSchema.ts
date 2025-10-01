@@ -1,4 +1,4 @@
-import { InputSchema } from "@banner/shared";
+import { InputSchema } from "@banner/shared/src/types";
 import { z } from "zod";
 
 export const CampaignInputSchema = InputSchema;
@@ -22,8 +22,8 @@ export const TONE_OPTIONS: CampaignInput["tone"][] = ["救済", "緊急", "権�
 export const STYLE_CODE_OPTIONS: Array<{ value: CampaignInput["style_code"], label: string; description: string }> = [
   { value: "AUTO", label: "自動 (推奨)", description: "ブランド情報と目標に基づき最適なテンプレートを自動選択します" },
   { value: "T1", label: "T1", description: "救済系テンプレート" },
-  { value: "T2", label: "緊急訴求テンプレート" },
-  { value: "T3", label: "権威訴求テンプレート" }
+  { value: "T2", label: "緊急訴求テンプレート", description: "強い危機感を訴求し即時のアクションを促します" },
+  { value: "T3", label: "権威訴求テンプレート", description: "実績や専門性を前面に出して安心感を与えます" }
 ];
 
 export const FORBIDDEN_PRESETS = ["特定商法違反", "返金保証", "必ず", "100%", "完全" ];

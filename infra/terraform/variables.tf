@@ -24,12 +24,6 @@ variable "artifact_registry" {
   description = "Artifact Registry repository path"
 }
 
-variable "nano_banana_endpoint" {
-  type        = string
-  description = "Base URL for nano banana API"
-  default     = "https://api.nano-banana.invalid"
-}
-
 variable "slack_webhook_url" {
   type        = string
   description = "Slack Incoming Webhook URL"
@@ -48,6 +42,18 @@ variable "notion_database_id" {
   default     = ""
 }
 
+variable "campaign_portal_ingest_base_url" {
+  type        = string
+  description = "Override for the portal ingest API base URL; defaults to the ingest-api Cloud Run URL"
+  default     = ""
+}
+
+variable "deploy_campaign_portal" {
+  type        = bool
+  description = "Whether to manage the campaign portal Cloud Run service"
+  default     = true
+}
+
 variable "labels" {
   type        = map(string)
   description = "Common resource labels"
@@ -58,6 +64,12 @@ variable "default_env" {
   type        = map(string)
   description = "Default environment variables shared across services"
   default     = {}
+}
+
+variable "background_model" {
+  type        = string
+  description = "Gemini image model identifier for background generation"
+  default     = "gemini-2.5-flash-image-preview"
 }
 
 variable "logging_dataset" {

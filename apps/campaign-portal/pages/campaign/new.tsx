@@ -30,7 +30,7 @@ import { FormField } from "@/components/input/FormField";
 import { WizardLayout } from "@/components/layout/WizardLayout";
 import { PreviewPanel } from "@/components/layout/PreviewPanel";
 import type { CampaignInput } from "@/lib/formSchema";
-import { CampaignInputSchema, MAX_ITEMS } from "@/lib/formSchema";
+import { CampaignInputSchema } from "@/lib/formSchema";
 import type { FieldKey } from "@/lib/fieldConfig";
 import { useCampaignDraft } from "@/hooks/useCampaignDraft";
 import { createCampaign, logSubmission } from "@/lib/api";
@@ -127,8 +127,8 @@ const emptyDefaults: CampaignInput = {
   brand_name: "",
   objective: "相談",
   target_note: "",
-  pain_points: [],
-  value_props: [],
+  pain_points: [] as unknown as CampaignInput["pain_points"],
+  value_props: [] as unknown as CampaignInput["value_props"],
   cta_type: "",
   brand_color_hex: "#1A202C",
   logo_url: "",

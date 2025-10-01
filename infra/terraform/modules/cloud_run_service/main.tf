@@ -49,6 +49,7 @@ resource "google_cloud_run_v2_service" "service" {
   location = var.region
   ingress  = var.ingress
   labels   = var.labels
+  deletion_protection = false
 
   template {
     service_account = var.service_account
@@ -78,4 +79,8 @@ resource "google_cloud_run_v2_service" "service" {
 
 output "uri" {
   value = google_cloud_run_v2_service.service.uri
+}
+
+output "name" {
+  value = google_cloud_run_v2_service.service.name
 }

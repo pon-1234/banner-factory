@@ -19,7 +19,7 @@ import type { CampaignInput } from "@/lib/formSchema";
 import { FieldKey, FIELD_CONFIG } from "@/lib/fieldConfig";
 import { TagInputField } from "./TagInputField";
 import { ExternalLinkIcon } from "@chakra-ui/icons";
-import { useMemo } from "react";
+import type { ReactNode } from "react";
 import { OBJECTIVE_OPTIONS, STYLE_CODE_OPTIONS, TONE_OPTIONS } from "@/lib/formSchema";
 
 interface FormFieldProps {
@@ -54,23 +54,7 @@ export function FormField({ name, isHidden }: FormFieldProps) {
       }
     : undefined;
 
-  const selectOptions = useMemo(() => {
-    if (config.type !== "select") {
-      return [] as Array<{ label: string; value: string; description?: string }>;
-    }
-    if (name === "objective") {
-      return OBJECTIVE_OPTIONS.map((item) => ({ label: item, value: item }));
-    }
-    if (name === "tone") {
-      return TONE_OPTIONS.map((item) => ({ label: item, value: item }));
-    }
-    if (name === "style_code") {
-      return STYLE_CODE_OPTIONS.map((item) => ({ label: `${item.label}`, value: item.value }));
-    }
-    return config.options ?? [];
-  }, [config.options, config.type, name]);
-
-  let fieldControl: JSX.Element | null = null;
+  let fieldControl: ReactNode = null;
 
   switch (config.type) {
     case "text":
@@ -82,6 +66,14 @@ export function FormField({ name, isHidden }: FormFieldProps) {
       );
       break;
     case "select": {
+      const selectOptions: Array<{ label: string; value: string; description?: string }> =
+        name === "objective"
+          ? OBJECTIVE_OPTIONS.map((item) => ({ label: item, value: item }))
+          : name === "tone"
+          ? TONE_OPTIONS.filter(Boolean).map((item) => ({ label: item as string, value: item as string }))
+          : name === "style_code"
+          ? STYLE_CODE_OPTIONS.map((item) => ({ label: item.label, value: item.value, description: item.description }))
+          : config.options ?? [];
       fieldControl = (
         <Select id={name} placeholder="選択してください" {...register(name, registerOptions)}>
           {selectOptions.map((option) => (

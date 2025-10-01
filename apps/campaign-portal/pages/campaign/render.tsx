@@ -15,7 +15,7 @@ import {
 } from "@chakra-ui/react";
 import Link from "next/link";
 import { useState } from "react";
-import { RenderRequestSchema } from "@banner/shared";
+import { RenderRequestSchema } from "@banner/shared/src/types";
 
 const renderRequestDefaults = {
   templates: ["T1"],

@@ -3,9 +3,12 @@ import type { CampaignInput } from "./formSchema";
 const INGEST_API_BASE_URL = process.env.NEXT_PUBLIC_INGEST_API_BASE_URL;
 
 class ApiError extends Error {
-  constructor(message: string, readonly status?: number) {
+  status?: number;
+
+  constructor(message: string, status?: number) {
     super(message);
     this.name = "ApiError";
+    this.status = status;
   }
 }
 

@@ -1,12 +1,13 @@
 import Fastify from "fastify";
 import { Firestore } from "@google-cloud/firestore";
-import { Storage } from "@google-cloud/storage";
+import { Storage, type File, type SaveOptions } from "@google-cloud/storage";
 import { PubSub } from "@google-cloud/pubsub";
 import { createCanvas, loadImage, registerFont, type CanvasRenderingContext2D } from "canvas";
 import { AspectRatio, TemplateCode, buildStoragePath, isoUtcNow } from "@banner/shared";
 import path from "node:path";
 import os from "node:os";
 import fs from "node:fs/promises";
+import crypto from "node:crypto";
 
 const fontDir = path.join(__dirname, "../fonts");
 const boldFontPath = path.join(fontDir, "NotoSansJP-Bold.otf");
@@ -84,6 +85,89 @@ function parseGcs(gcsPath: string) {
   return { bucket, name: object };
 }
 
+async function saveBufferToGcs(
+  file: File,
+  buffer: Buffer,
+  options: SaveOptions = {},
+  attempt = 1
+): Promise<void> {
+  try {
+    await file.save(buffer, { resumable: false, ...options });
+  } catch (err) {
+    const error = err as { code?: number } & Error;
+    const code = error.code;
+    const message = error.message ?? "";
+    if (attempt < 6 && (code === 429 || code === 503 || message.includes("rateLimitExceeded"))) {
+      const waitMs = attempt * 200;
+      await new Promise((resolve) => setTimeout(resolve, waitMs));
+      await saveBufferToGcs(file, buffer, options, attempt + 1);
+      return;
+    }
+    throw err;
+  }
+}
+
+interface BackgroundMetadata {
+  provider?: string;
+  seed?: string;
+  [key: string]: unknown;
+}
+
+async function loadMetadata(metaPath?: string): Promise<BackgroundMetadata | null> {
+  if (!metaPath) {
+    return null;
+  }
+  try {
+    const buffer = await downloadFromGcs(metaPath);
+    return JSON.parse(buffer.toString()) as BackgroundMetadata;
+  } catch {
+    return null;
+  }
+}
+
+function drawFallbackBackground(
+  ctx: CanvasRenderingContext2D,
+  size: { width: number; height: number },
+  seed: string
+) {
+  const hash = crypto.createHash("sha256").update(seed).digest();
+  const colorA = `#${hash.subarray(0, 3).toString("hex")}`;
+  const colorB = `#${hash.subarray(3, 6).toString("hex")}`;
+  const gradient = ctx.createLinearGradient(0, 0, size.width, size.height);
+  gradient.addColorStop(0, colorA);
+  gradient.addColorStop(1, colorB);
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, size.width, size.height);
+}
+
+async function drawBackground(
+  ctx: CanvasRenderingContext2D,
+  size: { width: number; height: number },
+  payload: ComposeTaskPayload
+): Promise<void> {
+  const metadata = await loadMetadata(payload.background_meta_path);
+  const fallbackSeed =
+    typeof metadata?.seed === "string" && metadata.seed.length > 0 ? metadata.seed : payload.variant_id;
+
+  if (metadata?.provider === "fallback") {
+    drawFallbackBackground(ctx, size, fallbackSeed);
+    return;
+  }
+
+  try {
+    const bgBuffer = await downloadFromGcs(payload.background_path);
+    const bgImage = await loadImage(bgBuffer);
+    ctx.drawImage(bgImage, 0, 0, size.width, size.height);
+  } catch (error) {
+    const message = (error as Error).message ?? "";
+    if (metadata?.provider === "fallback" || message.includes("out of memory")) {
+      drawFallbackBackground(ctx, size, fallbackSeed);
+      return;
+    }
+    throw error;
+  }
+}
+
 async function composeBanner(payload: ComposeTaskPayload): Promise<Buffer> {
   const size = SIZE_MAP[payload.size];
   if (!size) {
@@ -93,9 +177,7 @@ async function composeBanner(payload: ComposeTaskPayload): Promise<Buffer> {
   const canvas = createCanvas(size.width, size.height);
   const ctx = canvas.getContext("2d");
 
-  const bgBuffer = await downloadFromGcs(payload.background_path);
-  const bgImage = await loadImage(bgBuffer);
-  ctx.drawImage(bgImage, 0, 0, size.width, size.height);
+  await drawBackground(ctx, size, payload);
 
   // Overlay for readability if needed
   ctx.fillStyle = "rgba(0,0,0,0.45)";
@@ -196,7 +278,7 @@ async function saveOutput(buffer: Buffer, payload: ComposeTaskPayload): Promise<
 
   const objectPath = buildStoragePath(pathParts);
   const { bucket, name } = parseGcs(`gs://${OUTPUT_BUCKET}/${objectPath}`);
-  await storage.bucket(bucket).file(name).save(buffer, { contentType: "image/png" });
+  await saveBufferToGcs(storage.bucket(bucket).file(name), buffer, { contentType: "image/png" });
 
   // Generate preview (512px width) by resizing via canvas re-render
   const tmpFile = path.join(os.tmpdir(), `banner-${Date.now()}.png`);
@@ -208,8 +290,12 @@ async function saveOutput(buffer: Buffer, payload: ComposeTaskPayload): Promise<
   previewCtx.drawImage(image, 0, 0, 512, Math.round(512 * ratio));
   const previewBuffer = previewCanvas.toBuffer("image/jpeg", { quality: 0.85 });
   const previewPath = `previews/${objectPath.replace(/\.png$/, ".jpg")}`;
-  await storage.bucket(bucket).file(previewPath).save(previewBuffer, { contentType: "image/jpeg" });
-  await fs.unlink(tmpFile);
+  await saveBufferToGcs(storage.bucket(bucket).file(previewPath), previewBuffer, { contentType: "image/jpeg" });
+  await fs.unlink(tmpFile).catch((error) => {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw error;
+    }
+  });
 
   return {
     assetPath: `gs://${bucket}/${name}`,

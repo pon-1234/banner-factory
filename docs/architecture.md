@@ -2,7 +2,7 @@
 
 ## Objectives
 - Accept multi-channel campaign inputs (form/CSV/JSON) and translate them into consistent banner variants.
-- Orchestrate background generation via nano banana API and compose layered creatives with HTML/CSS rendering.
+- Orchestrate background generation via Gemini image models and compose layered creatives with HTML/CSS rendering.
 - Auto-expand to multiple aspect ratios (1:1, 4:5, 1200×628, 1080×1920) while respecting safe zones and layout rules.
 - Enforce QC/compliance gates (text legibility, forbidden claims, stat evidence) prior to delivery.
 - Deliver final assets and metadata to Slack/Notion along with audit trails and approvals.
@@ -53,12 +53,42 @@ flowchart LR
 
 ### prompt-builder (Cloud Run Job)
 - Resolves template config (T1/T2/T3) and tone/style modifiers.
-- Builds nano banana prompts and records prompt hash + references in Firestore `variant` documents.
+- Builds Gemini prompts and records prompt hash + references in Firestore `variant` documents.
 
 ### bg-generator (Cloud Run Job)
-- Calls nano banana API using signed Secret Manager credentials.
-- Retries up to 3 times with exponential backoff, then falls back to stock backgrounds.
+- Calls the Gemini Image API using Secret Manager-provided API keys (see sample below).
+- Retries up to 3 times with exponential backoff, then produces a deterministic gradient fallback.
 - Stores background image and metadata JSON in Storage.
+
+```ts
+import { GoogleGenAI } from "@google/genai";
+import * as fs from "node:fs";
+
+async function main() {
+  const ai = new GoogleGenAI();
+
+  const response = await ai.models.generateContent({
+    model: "gemini-2.5-flash-image-preview",
+    contents: [
+      {
+        role: "user",
+        parts: [{ text: "Create a CoinAssist emergency recovery background" }]
+      }
+    ]
+  });
+
+  const inline = response.candidates?.[0]?.content?.parts?.find((part) =>
+    Boolean((part as { inlineData?: { data: string } }).inlineData)
+  ) as { inlineData: { data: string } } | undefined;
+
+  if (inline?.inlineData?.data) {
+    const buffer = Buffer.from(inline.inlineData.data, "base64");
+    fs.writeFileSync("gemini-sample.png", buffer);
+  }
+}
+
+void main();
+```
 
 ### compositor (Cloud Run Job)
 - Uses headless Chromium (Puppeteer) + Sharp to compose final banners per size.
@@ -74,6 +104,11 @@ flowchart LR
 ### delivery-service (Cloud Run)
 - Monitors Firestore for QC-passed assets (via Eventarc trigger) and posts Slack/Notion messages.
 - Handles approval workflow (two :+1: reactions) before marking assets as "publishable".
+
+### campaign-portal (Cloud Run)
+- Next.js front-end for internal teams to submit campaign briefs.
+- Calls `ingest-api` via the `NEXT_PUBLIC_INGEST_API_BASE_URL` environment variable.
+- Served publicly via Cloud Run with static assets generated at build time.
 
 ## Storage layout
 ```
@@ -101,7 +136,7 @@ flowchart LR
 ## Security & compliance
 - Cloud Armor fronting HTTPS Load Balancer to protect public endpoints.
 - Service-to-service auth with IAM service accounts and Audience-limited OAuth tokens.
-- Secret Manager for API keys (nano banana, Slack, Notion) with automatic rotation.
+- Secret Manager for API keys (Gemini, Slack, Notion) with automatic rotation.
 - VPC Service Controls around Storage/Firestore to prevent data exfiltration.
 
 ## Deployment pipeline
@@ -112,5 +147,4 @@ flowchart LR
 ## Local development
 - Run individual services with `npm run dev --workspace services/<service>`.
 - Use `tasks/local/` scripts to simulate Workflows/Cloud Tasks by invoking service entrypoints sequentially.
-- Compose background generator results using stub fixtures to avoid hitting nano banana in dev.
-
+- Compose background generator results using stub fixtures to avoid hitting the Gemini API in dev.

@@ -26,7 +26,7 @@ locals {
   labels = merge(var.labels, {
     app = "banner-factory"
   })
-  services = [
+  core_service_names = [
     "ingest-api",
     "prompt-builder",
     "bg-generator",
@@ -91,37 +91,70 @@ resource "google_pubsub_topic" "delivery" {
 }
 
 resource "google_service_account" "services" {
-  count        = length(local.services)
-  account_id   = local.services[count.index]
-  display_name = "${local.services[count.index]} service"
+  count        = length(local.core_service_names)
+  account_id   = local.core_service_names[count.index]
+  display_name = "${local.core_service_names[count.index]} service"
+}
+
+resource "google_service_account" "campaign_portal" {
+  account_id   = "campaign-portal"
+  display_name = "campaign-portal service"
 }
 
 module "cloud_run_services" {
   source = "./modules/cloud_run_service"
 
-  for_each = var.manage_cloud_run_services ? toset(local.services) : toset([])
+  for_each = var.manage_cloud_run_services ? { for name in local.core_service_names : name => name } : {}
 
   service_name    = each.key
   region          = var.region
   image           = "${var.artifact_registry}/${each.key}:latest"
-  service_account = element(google_service_account.services[*].email, index(local.services, each.key))
+  service_account = element(google_service_account.services[*].email, index(local.core_service_names, each.key))
   env = merge(var.default_env, {
-    OUTPUT_BUCKET        = google_storage_bucket.assets.name,
-    STOCK_BUCKET         = google_storage_bucket.stock_backgrounds.name,
-    BG_TOPIC             = google_pubsub_topic.bg.name,
-    COMPOSE_TOPIC        = google_pubsub_topic.compose.name,
-    QC_TOPIC             = google_pubsub_topic.qc.name,
-    DELIVERY_TOPIC       = google_pubsub_topic.delivery.name,
-    NANO_BANANA_ENDPOINT = var.nano_banana_endpoint,
-    SLACK_WEBHOOK_URL    = var.slack_webhook_url,
-    NOTION_API_KEY       = var.notion_api_key,
-    NOTION_DATABASE_ID   = var.notion_database_id
+    OUTPUT_BUCKET      = google_storage_bucket.assets.name,
+    STOCK_BUCKET       = google_storage_bucket.stock_backgrounds.name,
+    BG_TOPIC           = google_pubsub_topic.bg.name,
+    COMPOSE_TOPIC      = google_pubsub_topic.compose.name,
+    QC_TOPIC           = google_pubsub_topic.qc.name,
+    DELIVERY_TOPIC     = google_pubsub_topic.delivery.name,
+    BG_MODEL           = var.background_model,
+    SLACK_WEBHOOK_URL  = var.slack_webhook_url,
+    NOTION_API_KEY     = var.notion_api_key,
+    NOTION_DATABASE_ID = var.notion_database_id
   })
   ingress        = "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER"
   min_instances  = 0
   max_instances  = 5
   cpu_throttling = true
   labels         = local.labels
+}
+
+module "campaign_portal_service" {
+  source = "./modules/cloud_run_service"
+
+  count = var.deploy_campaign_portal ? 1 : 0
+
+  service_name    = "campaign-portal"
+  region          = var.region
+  image           = "${var.artifact_registry}/campaign-portal:latest"
+  service_account = google_service_account.campaign_portal.email
+  env = merge(var.default_env, {
+    NEXT_PUBLIC_INGEST_API_BASE_URL = var.campaign_portal_ingest_base_url != "" ? var.campaign_portal_ingest_base_url : data.google_cloud_run_service.ingest_api.status[0].url
+  })
+  ingress        = "INGRESS_TRAFFIC_ALL"
+  min_instances  = 0
+  max_instances  = 3
+  cpu_throttling = true
+  labels         = local.labels
+}
+
+resource "google_cloud_run_service_iam_member" "campaign_portal_public" {
+  count    = var.deploy_campaign_portal ? 1 : 0
+  project  = var.project_id
+  location = var.region
+  service  = module.campaign_portal_service[0].name
+  role     = "roles/run.invoker"
+  member   = "allUsers"
 }
 
 locals {
@@ -149,6 +182,11 @@ data "google_cloud_run_service" "push_targets" {
   for_each = local.push_subscriptions
 
   name     = each.key
+  location = var.region
+}
+
+data "google_cloud_run_service" "ingest_api" {
+  name     = "ingest-api"
   location = var.region
 }
 

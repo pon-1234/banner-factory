@@ -28,9 +28,9 @@ fi
 # Secret Managerにシークレットを登録
 echo "🔑 Secret Managerにシークレットを登録します..."
 
-NANO_BANANA_API_KEY=${NANO_BANANA_API_KEY:-""}
-echo "$NANO_BANANA_API_KEY" | gcloud secrets create nano-banana-api-key --data-file=- || \
-echo "$NANO_BANANA_API_KEY" | gcloud secrets versions add nano-banana-api-key --data-file=-
+GENAI_API_KEY=${GENAI_API_KEY:-${GOOGLE_API_KEY:-""}}
+echo "$GENAI_API_KEY" | gcloud secrets create google-genai-api-key --data-file=- || \
+echo "$GENAI_API_KEY" | gcloud secrets versions add google-genai-api-key --data-file=-
 
 # Slack Webhook URL
 SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL:-""}
@@ -93,11 +93,11 @@ for svc in "${services[@]}"; do
     # 競合する既存の平文ENVを削除
     gcloud run services update $svc \
         --region=$REGION \
-        --remove-env-vars="NANO_BANANA_API_KEY,SLACK_WEBHOOK_URL,NOTION_API_KEY,NOTION_DATABASE_ID" || true
+        --remove-env-vars="SLACK_WEBHOOK_URL,NOTION_API_KEY,NOTION_DATABASE_ID,BG_PROVIDER,NANO_BANANA_API_KEY" || true
 
     gcloud run services update $svc \
         --region=$REGION \
-        --set-secrets="NANO_BANANA_API_KEY=nano-banana-api-key:latest,GOOGLE_API_KEY=nano-banana-api-key:latest,SLACK_WEBHOOK_URL=slack-webhook-url:latest,NOTION_API_KEY=notion-api-key:latest,NOTION_DATABASE_ID=notion-database-id:latest"
+        --set-secrets="GOOGLE_API_KEY=google-genai-api-key:latest,SLACK_WEBHOOK_URL=slack-webhook-url:latest,NOTION_API_KEY=notion-api-key:latest,NOTION_DATABASE_ID=notion-database-id:latest"
 done
 
 echo "✅ Secret ManagerとIAM設定が完了しました！"

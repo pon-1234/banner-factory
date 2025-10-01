@@ -47,18 +47,36 @@ done
 Store API keys and tokens in Secret Manager and inject them into Cloud Run services:
 
 ```bash
-gcloud secrets create nano-banana-key --data-file=- <<'EOF'
-YOUR_NANO_BANANA_KEY
+gcloud secrets create google-genai-api-key --data-file=- <<'EOF'
+YOUR_GEMINI_API_KEY
 EOF
 
 for svc in bg-generator ingest-api compositor qc-service delivery-service; do
   gcloud run services update ${svc} \
     --region=${REGION} \
-    --set-secrets=NANO_BANANA_API_KEY=nano-banana-key:latest
+    --set-secrets=GOOGLE_API_KEY=google-genai-api-key:latest
 done
 ```
 
 Similarly, create secrets for Slack webhook and Notion token, then attach them via `--set-secrets`.
+
+## Deploy campaign portal (Next.js)
+The front-end portal runs on Cloud Run from the `apps/campaign-portal` workspace. Build and push the container, then let Terraform roll out the service:
+
+```bash
+# Build & push to Artifact Registry (include :latest so Terraform picks it up)
+gcloud builds submit apps/campaign-portal \\
+  --tag="asia-northeast1-docker.pkg.dev/${PROJECT_ID}/${REPO}/campaign-portal:latest"
+
+# Apply infrastructure changes (creates the Cloud Run service and exposes it publicly)
+cd infra/terraform
+terraform apply
+
+# Retrieve the public URL
+terraform output campaign_portal_url
+```
+
+By default the portal reads `NEXT_PUBLIC_INGEST_API_BASE_URL` from the ingest API Cloud Run URL; override `campaign_portal_ingest_base_url` in `terraform.tfvars` if you need a different endpoint.
 
 ## Workflows trigger
 Create an HTTPS trigger or schedule to invoke the workflow when ingestion occurs. Example using REST call:
