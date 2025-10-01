@@ -72,6 +72,32 @@ const schema = CampaignInputSchema.superRefine((data, ctx) => {
       message: "課題は30文字以内で入力してください"
     });
   }
+  if (data.cta_type && data.cta_type.length > 12) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["cta_type"],
+      message: "CTAは12文字以内で入力してください"
+    });
+  }
+  const VALUE_LIMIT = 24;
+  data.value_props?.forEach((item, index) => {
+    if (item.length > VALUE_LIMIT) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["value_props", index],
+        message: `${VALUE_LIMIT}文字以内で入力してください`
+      });
+    }
+  });
+  data.value_props_secondary?.forEach((item, index) => {
+    if (item.length > VALUE_LIMIT) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["value_props_secondary", index],
+        message: `${VALUE_LIMIT}文字以内で入力してください`
+      });
+    }
+  });
   if (data.stat_claim) {
     if (!data.stat_evidence_url) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["stat_evidence_url"], message: "必須項目です" });

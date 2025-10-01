@@ -53,13 +53,14 @@ export const FIELD_CONFIG: Record<FieldKey, FieldConfig> = {
     key: "value_props",
     label: "価値提案",
     placeholder: "Enterで追加 (最大3件)",
-    helperText: "訴求したい価値・メリットを入力してください",
+    helperText: "訴求したい価値・メリットを入力してください（24文字以内推奨）",
     type: "tag"
   },
   cta_type: {
     key: "cta_type",
     label: "CTAテキスト",
     placeholder: "例: 無料で相談する",
+    helperText: "画像内に直接表示されます（全角12文字以内推奨）",
     type: "text"
   },
   brand_color_hex: {

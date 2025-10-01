@@ -9,8 +9,11 @@ import {
   HStack,
   Image,
   Stack,
-  Text
+  Text,
+  Wrap,
+  WrapItem
 } from "@chakra-ui/react";
+import { buildCopy, type TemplateCode } from "@banner/shared";
 import type { CampaignInput } from "@/lib/formSchema";
 import { STYLE_CODE_OPTIONS } from "@/lib/formSchema";
 
@@ -21,8 +24,30 @@ interface PreviewPanelProps {
 
 export function PreviewPanel({ values, metadata }: PreviewPanelProps) {
   const styleDescription = STYLE_CODE_OPTIONS.find((item) => item.value === values.style_code)?.description;
+  const canPreviewCopy = Boolean(
+    values.brand_name &&
+      values.cta_type &&
+      (values.pain_points?.length ?? 0) > 0 &&
+      (values.value_props?.length ?? 0) > 0
+  );
+  const templateCandidates: TemplateCode[] =
+    values.style_code && values.style_code !== "AUTO"
+      ? [values.style_code as TemplateCode]
+      : (["T1", "T2", "T3"] as TemplateCode[]);
+  const copyPreviews = canPreviewCopy
+    ? templateCandidates.map((template) => ({
+        template,
+        copy: buildCopy(values, template)
+      }))
+    : [];
   return (
     <Stack spacing={6}>
+      <Alert status="info" borderRadius="md">
+        <AlertIcon />
+        <AlertDescription fontSize="sm">
+          入力したコピー文言は画像内に直接レンダリングされます。文字数オーバーが無いか下部プレビューをご確認ください。
+        </AlertDescription>
+      </Alert>
       <Box>
         <Heading size="md" mb={3}>
           ライブプレビュー
@@ -56,6 +81,63 @@ export function PreviewPanel({ values, metadata }: PreviewPanelProps) {
         <Text fontSize="sm" color="gray.600">
           {styleDescription ?? "スタイルは自動で選定されます"}
         </Text>
+      </Box>
+
+      <Box>
+        <Heading size="sm" mb={2}>
+          コピー生成プレビュー
+        </Heading>
+        {canPreviewCopy ? (
+          <Stack spacing={3}>
+            {values.style_code === "AUTO" ? (
+              <Text fontSize="xs" color="gray.500">
+                AUTO指定の場合はテンプレートごとに最適なコピーが生成されます（以下は想定例です）。
+              </Text>
+            ) : null}
+            {copyPreviews.map(({ template, copy }) => (
+              <Box key={template} borderWidth="1px" borderColor="gray.100" borderRadius="md" p={4} bg="white">
+                <HStack justify="space-between" mb={2}>
+                  <Badge colorScheme="purple">{template}</Badge>
+                  <Text fontSize="xs" color="gray.500">
+                    画像内テキスト想定
+                  </Text>
+                </HStack>
+                <Stack spacing={2} fontSize="sm">
+                  <Text fontWeight="bold">{copy.headline}</Text>
+                  {copy.sub ? <Text color="gray.600">{copy.sub}</Text> : null}
+                  {copy.badges?.length ? (
+                    <Wrap spacing={2} shouldWrapChildren>
+                      {copy.badges.map((badge) => (
+                        <WrapItem key={badge}>
+                          <Badge colorScheme="orange" variant="subtle">
+                            {badge}
+                          </Badge>
+                        </WrapItem>
+                      ))}
+                    </Wrap>
+                  ) : null}
+                  <Text color="orange.600" fontWeight="semibold">
+                    CTA: {copy.cta}
+                  </Text>
+                  {copy.disclaimer ? (
+                    <Text fontSize="xs" color="gray.500">
+                      {copy.disclaimer}
+                    </Text>
+                  ) : null}
+                  {copy.stat_note ? (
+                    <Text fontSize="xs" color="gray.500">
+                      {copy.stat_note}
+                    </Text>
+                  ) : null}
+                </Stack>
+              </Box>
+            ))}
+          </Stack>
+        ) : (
+          <Text fontSize="sm" color="gray.500">
+            ブランド名・課題・価値提案・CTAを入力するとコピーの自動生成プレビューが表示されます。
+          </Text>
+        )}
       </Box>
 
       <Box>
