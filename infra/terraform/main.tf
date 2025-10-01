@@ -122,6 +122,12 @@ module "cloud_run_services" {
     NOTION_API_KEY     = var.notion_api_key,
     NOTION_DATABASE_ID = var.notion_database_id
   })
+  secrets = each.key == "compositor" ? {
+    OPENAI_API_KEY = {
+      secret_name    = "openai-api-key"
+      secret_version = "latest"
+    }
+  } : {}
   ingress        = "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER"
   min_instances  = 0
   max_instances  = 5

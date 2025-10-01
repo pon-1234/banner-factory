@@ -154,8 +154,8 @@ async function generateOpenAiBanner(payload: ComposeTaskPayload, size: { width: 
   const response = await openaiClient.images.generate({
     model: OPENAI_IMAGE_MODEL,
     prompt: finalPrompt,
-    size: requestSize,
-    quality: OPENAI_IMAGE_QUALITY,
+    size: requestSize as "1024x1024" | "1024x1536" | "1536x1024" | "1024x1792",
+    quality: OPENAI_IMAGE_QUALITY as "standard" | "hd",
     response_format: "b64_json"
   });
 

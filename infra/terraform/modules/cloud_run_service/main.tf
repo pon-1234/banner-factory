@@ -44,6 +44,14 @@ variable "cpu_throttling" {
   default = true
 }
 
+variable "secrets" {
+  type = map(object({
+    secret_name    = string
+    secret_version = string
+  }))
+  default = {}
+}
+
 resource "google_cloud_run_v2_service" "service" {
   name     = var.service_name
   location = var.region
@@ -64,6 +72,18 @@ resource "google_cloud_run_v2_service" "service" {
         content {
           name  = env.key
           value = env.value
+        }
+      }
+      dynamic "env" {
+        for_each = var.secrets
+        content {
+          name = env.key
+          value_source {
+            secret_key_ref {
+              secret  = env.value.secret_name
+              version = env.value.secret_version
+            }
+          }
         }
       }
       resources {

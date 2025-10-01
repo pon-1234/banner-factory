@@ -13,3 +13,4 @@ default_env = {
   "NODE_ENV"      = "production"
   "GCLOUD_REGION" = "asia-northeast1"
 }
+manage_cloud_run_services = true
