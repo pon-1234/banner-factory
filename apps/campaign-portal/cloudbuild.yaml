@@ -1,0 +1,11 @@
+steps:
+- name: 'gcr.io/cloud-builders/docker'
+  args: [
+    'build',
+    '-t', 'asia-northeast1-docker.pkg.dev/banner-factory/banner-factory/campaign-portal:latest',
+    '-f', 'apps/campaign-portal/Dockerfile',
+    '.'
+  ]
+images:
+- 'asia-northeast1-docker.pkg.dev/banner-factory/banner-factory/campaign-portal:latest'
+timeout: 1200s

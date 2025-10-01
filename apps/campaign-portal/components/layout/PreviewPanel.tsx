@@ -13,7 +13,8 @@ import {
   Wrap,
   WrapItem
 } from "@chakra-ui/react";
-import { buildCopy, type TemplateCode } from "@banner/shared";
+import type { TemplateCode } from "@banner/shared/dist/types";
+import { buildCopy } from "@banner/shared/dist/copy";
 import type { CampaignInput } from "@/lib/formSchema";
 import { STYLE_CODE_OPTIONS } from "@/lib/formSchema";
 
