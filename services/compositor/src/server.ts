@@ -39,7 +39,7 @@ const OUTPUT_BUCKET = process.env.OUTPUT_BUCKET ?? "banner-assets";
 const QC_TOPIC = process.env.QC_TOPIC ?? "qc-tasks";
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY ?? "";
 const OPENAI_IMAGE_MODEL = process.env.OPENAI_IMAGE_MODEL ?? "gpt-image-1";
-const OPENAI_IMAGE_QUALITY = process.env.OPENAI_IMAGE_QUALITY ?? "standard";
+const OPENAI_IMAGE_QUALITY = process.env.OPENAI_IMAGE_QUALITY ?? "high";
 
 const openaiClient = OPENAI_API_KEY ? new OpenAI({ apiKey: OPENAI_API_KEY }) : null;
 
@@ -155,16 +155,20 @@ async function generateOpenAiBanner(payload: ComposeTaskPayload, size: { width: 
     model: OPENAI_IMAGE_MODEL,
     prompt: finalPrompt,
     size: requestSize as "1024x1024" | "1024x1536" | "1536x1024" | "1024x1792",
-    quality: OPENAI_IMAGE_QUALITY as "standard" | "hd",
-    response_format: "b64_json"
+    quality: OPENAI_IMAGE_QUALITY as "low" | "medium" | "high" | "auto"
   });
 
-  const imageData = response.data?.[0]?.b64_json;
-  if (!imageData) {
-    throw new Error("openai image response missing data");
+  const imageUrl = response.data?.[0]?.url;
+  if (!imageUrl) {
+    throw new Error("openai image response missing url");
   }
 
-  const rawBuffer = Buffer.from(imageData, "base64");
+  // Download the image from URL
+  const imageResponse = await fetch(imageUrl);
+  if (!imageResponse.ok) {
+    throw new Error(`Failed to download image: ${imageResponse.statusText}`);
+  }
+  const rawBuffer = Buffer.from(await imageResponse.arrayBuffer());
   const sourceImage = await loadImage(rawBuffer);
   const canvas = createCanvas(size.width, size.height);
   const ctx = canvas.getContext("2d");
