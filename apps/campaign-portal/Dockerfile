@@ -9,6 +9,8 @@ RUN npm ci
 
 FROM node:20-bullseye AS builder
 WORKDIR /workspace
+ARG NEXT_PUBLIC_INGEST_API_BASE_URL=https://ingest-api-vk3mjut3xq-an.a.run.app
+ENV NEXT_PUBLIC_INGEST_API_BASE_URL=$NEXT_PUBLIC_INGEST_API_BASE_URL
 COPY --from=deps /workspace/node_modules ./node_modules
 COPY package.json package-lock.json turbo.json tsconfig.base.json ./
 COPY apps ./apps
