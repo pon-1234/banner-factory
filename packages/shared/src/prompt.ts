@@ -31,10 +31,14 @@ export function buildPrompt(input: CampaignInput, context: PromptContext): { pro
   if (input.bg_style_refs?.length) {
     overlays.push(`inspired by reference backgrounds: ${input.bg_style_refs.join(", ")}`);
   }
-  overlays.push(`brand palette highlighting ${input.brand_color_hex}`);
+  if (input.brand_color_hex) {
+    overlays.push(`brand palette highlighting ${input.brand_color_hex}`);
+  } else {
+    overlays.push("use harmonious brand-safe color palette");
+  }
   overlays.push(`speak to audience: ${input.target_note}`);
   const prompt = `${base}, ${overlays.join(", ")}`;
-  const seedSource = `${input.lp_url}:${context.template}:${context.tone}:${input.style_code}:${input.brand_name}`;
+  const seedSource = `${input.lp_url ?? input.brand_name}:${context.template}:${context.tone}:${input.style_code}:${input.brand_name}`;
   return {
     prompt,
     seed: crypto.createHash("sha256").update(seedSource).digest("hex").slice(0, 16)

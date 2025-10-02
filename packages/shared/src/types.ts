@@ -1,15 +1,15 @@
 import { z } from "zod";
 
 export const InputSchema = z.object({
-  lp_url: z.string().url(),
+  lp_url: z.string().url().optional(),
   brand_name: z.string().min(1),
   objective: z.enum(["獲得", "相談", "診断", "資料請求"]),
   target_note: z.string().min(1),
   pain_points: z.array(z.string().min(1)).max(3).nonempty(),
   value_props: z.array(z.string().min(1)).max(3).nonempty(),
   cta_type: z.string().min(1),
-  brand_color_hex: z.string().regex(/^#([0-9A-Fa-f]{6})$/),
-  logo_url: z.string().url(),
+  brand_color_hex: z.string().regex(/^#([0-9A-Fa-f]{6})$/).optional(),
+  logo_url: z.string().url().optional(),
   forbidden_phrases: z.array(z.string()).optional(),
   reference_banners: z.array(z.string().url()).optional(),
   bg_style_refs: z.array(z.string().url()).optional(),

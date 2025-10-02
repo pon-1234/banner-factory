@@ -22,8 +22,9 @@ export const FIELD_CONFIG: Record<FieldKey, FieldConfig> = {
     key: "lp_url",
     label: "LP URL",
     placeholder: "https://",
-    helperText: "最終的な遷移先のURLを入力してください",
-    type: "url"
+    helperText: "任意。LPメタデータを取得したい場合に入力してください",
+    type: "url",
+    optional: true
   },
   brand_name: {
     key: "brand_name",
@@ -66,14 +67,17 @@ export const FIELD_CONFIG: Record<FieldKey, FieldConfig> = {
   brand_color_hex: {
     key: "brand_color_hex",
     label: "ブランドカラー",
-    helperText: "16進数カラーコード (#付き)",
-    type: "color"
+    helperText: "任意。未入力の場合は自動で配色を調整します",
+    type: "color",
+    optional: true
   },
   logo_url: {
     key: "logo_url",
     label: "ロゴ画像URL",
     placeholder: "https://",
-    type: "url"
+    helperText: "任意。ロゴ画像を参照したい場合に入力してください",
+    type: "url",
+    optional: true
   },
   forbidden_phrases: {
     key: "forbidden_phrases",

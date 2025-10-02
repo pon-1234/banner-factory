@@ -54,7 +54,7 @@ export function PreviewPanel({ values, metadata }: PreviewPanelProps) {
           ライブプレビュー
         </Heading>
         <Box borderWidth="1px" borderColor="gray.100" rounded="lg" overflow="hidden">
-          <Box bg={values.brand_color_hex} color="white" p={4}>
+          <Box bg={values.brand_color_hex ?? "#1A202C"} color="white" p={4}>
             <Text fontWeight="bold" fontSize="lg">
               {values.brand_name || "Brand"}
             </Text>
