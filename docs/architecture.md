@@ -42,8 +42,9 @@ flowchart LR
 ### ingest-api (Cloud Run)
 - REST endpoints for form/UI submissions and bulk uploads.
 - Validates against shared JSON Schemas (see `packages/shared/schemas`).
-- Creates `campaign` documents and enqueues Workflows executions.
+- Creates `campaign` documents, expands render requests into prompt-builder variants, and enqueues background generation tasks.
 - Provides `GET /campaigns/:id` for status and metadata retrieval.
+- Exposes `GET /campaigns/:id/progress` to aggregate render job states for the campaign portal dashboard.
 
 ### render-orchestrator (Cloud Workflows)
 - Reads templates, sizes, and variant counts from request payload.

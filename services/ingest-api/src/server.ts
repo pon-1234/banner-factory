@@ -2,14 +2,19 @@ import Fastify from "fastify";
 import cors from "@fastify/cors";
 import { Firestore } from "@google-cloud/firestore";
 import { PubSub } from "@google-cloud/pubsub";
+import fetch from "node-fetch";
+import type { FastifyBaseLogger } from "fastify";
 import {
   AspectRatio,
   InputSchema,
   RenderRequestSchema,
+  type RenderRequest,
   RenderJobSchema,
   type RenderJobRecord,
   RenderJobStatus,
   RenderJobStatusSchema,
+  TemplateCode,
+  type CopyBlock,
   createHashId,
   isoUtcNow
 } from "@banner/shared";
@@ -18,6 +23,7 @@ const firestore = new Firestore();
 const pubsub = new PubSub();
 
 const BG_TOPIC = process.env.BG_TOPIC ?? "bg-tasks";
+const PROMPT_BUILDER_HOST = process.env.PROMPT_BUILDER_HOST ?? "";
 
 function toPublicUrl(gcsPath?: string | null): string | null {
   if (!gcsPath) {
@@ -40,6 +46,82 @@ function normalizeSizes(sizes: unknown): AspectRatio[] {
 function coerceStatus(status: unknown): RenderJobStatus {
   const parsed = RenderJobStatusSchema.safeParse(status);
   return parsed.success ? parsed.data : "queued";
+}
+
+type Tone = "救済" | "緊急" | "権威";
+
+interface PromptBuilderVariantResult {
+  variant_id: string;
+  prompt: string;
+  seed: string;
+  template: TemplateCode;
+  tone: Tone;
+  refs: string[];
+  sizes: AspectRatio[];
+  brand: string;
+  slug: string;
+  copy: CopyBlock;
+}
+
+interface BgTaskPayload extends PromptBuilderVariantResult {
+  campaign_id: string;
+}
+
+async function requestPromptBuilderVariant(
+  campaignId: string,
+  template: TemplateCode,
+  variantIndex: number,
+  renderRequest: RenderRequest,
+  log: FastifyBaseLogger
+): Promise<PromptBuilderVariantResult> {
+  const url = `${PROMPT_BUILDER_HOST}/workflows/variants`;
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      campaign_id: campaignId,
+      template,
+      variant_index: variantIndex,
+      request: renderRequest
+    })
+  });
+
+  if (!response.ok) {
+    const body = await response.text();
+    log.error({ status: response.status, body }, "prompt-builder request failed");
+    throw new Error(`prompt-builder responded with status ${response.status}`);
+  }
+
+  const json = (await response.json()) as PromptBuilderVariantResult;
+  return {
+    ...json,
+    refs: Array.isArray(json.refs) ? json.refs : [],
+    sizes: normalizeSizes(json.sizes ?? renderRequest.sizes ?? []),
+    copy: json.copy
+  };
+}
+
+async function buildVariantsFromRequest(renderRequest: RenderRequest, log: FastifyBaseLogger): Promise<PromptBuilderVariantResult[]> {
+  const variants: PromptBuilderVariantResult[] = [];
+  for (const template of renderRequest.templates) {
+    for (let idx = 0; idx < renderRequest.count_per_template; idx += 1) {
+      const variant = await requestPromptBuilderVariant(renderRequest.campaign_id, template, idx, renderRequest, log);
+      variants.push(variant);
+    }
+  }
+  return variants;
+}
+
+async function enqueueBackgroundTasks(campaignId: string, variants: PromptBuilderVariantResult[]): Promise<string[]> {
+  const publishPromises = variants.map((variant) => {
+    const payload: BgTaskPayload = {
+      campaign_id: campaignId,
+      ...variant
+    };
+    return pubsub.topic(BG_TOPIC).publishMessage({ json: payload });
+  });
+
+  return Promise.all(publishPromises);
 }
 
 export async function buildServer() {
@@ -90,18 +172,51 @@ export async function buildServer() {
 
     const renderRequest = parsed.data;
 
-    const messageId = await pubsub.topic(BG_TOPIC).publishMessage({
-      json: renderRequest
-    });
+    if (!PROMPT_BUILDER_HOST) {
+      request.log.error("PROMPT_BUILDER_HOST env var is not configured");
+      return reply.status(503).send({ error: "SERVICE_UNAVAILABLE", message: "Prompt builder endpoint is not configured" });
+    }
 
-    const campaignDoc = firestore.collection("campaign").doc(renderRequest.campaign_id);
-    await campaignDoc.update({
-      status: "rendering",
-      render_topic_message_id: messageId,
-      updated_at: isoUtcNow()
-    });
+    if (!renderRequest.templates.length) {
+      return reply.status(400).send({ error: "INVALID_PAYLOAD", message: "templates must contain at least one template" });
+    }
 
-    return reply.status(202).send({ job_enqueued: true, message_id: messageId });
+    if (!renderRequest.inputs.length) {
+      return reply.status(400).send({ error: "INVALID_PAYLOAD", message: "inputs must contain at least one campaign input" });
+    }
+
+    try {
+      const variants = await buildVariantsFromRequest(renderRequest, request.log);
+      const messageIds = await enqueueBackgroundTasks(renderRequest.campaign_id, variants);
+
+      const campaignDoc = firestore.collection("campaign").doc(renderRequest.campaign_id);
+      await campaignDoc.update({
+        status: "rendering",
+        render_variant_count: variants.length,
+        render_variants: variants.map((variant) => ({
+          variant_id: variant.variant_id,
+          template: variant.template,
+          tone: variant.tone,
+          sizes: variant.sizes
+        })),
+        last_render_request_at: isoUtcNow(),
+        updated_at: isoUtcNow()
+      });
+
+      return reply.status(202).send({
+        job_enqueued: true,
+        variants: variants.map((variant) => ({
+          variant_id: variant.variant_id,
+          template: variant.template,
+          tone: variant.tone,
+          sizes: variant.sizes
+        })),
+        message_ids: messageIds
+      });
+    } catch (error) {
+      request.log.error({ err: error }, "failed to prepare render tasks");
+      return reply.status(500).send({ error: "RENDER_PREP_FAILED", message: (error as Error).message });
+    }
   });
 
   app.get("/v1/campaigns/:campaignId", async (request, reply) => {
