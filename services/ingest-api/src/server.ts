@@ -49,6 +49,19 @@ function coerceStatus(status: unknown): RenderJobStatus {
   return parsed.success ? parsed.data : "queued";
 }
 
+function pruneUndefined<T>(value: T): T {
+  if (Array.isArray(value)) {
+    return value.map((entry) => pruneUndefined(entry)) as unknown as T;
+  }
+  if (value && typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .filter(([, v]) => v !== undefined)
+      .map(([k, v]) => [k, pruneUndefined(v)]);
+    return Object.fromEntries(entries) as unknown as T;
+  }
+  return value;
+}
+
 type Tone = "救済" | "緊急" | "権威";
 
 interface VariantBuildResult {
@@ -143,7 +156,7 @@ async function buildVariant(
   const tone = resolveTone(template, input);
   const refs = collectRefs(input);
   const { prompt, seed } = buildPrompt(input, { template, tone, refs });
-  const copy = buildCopy(input, template);
+  const copy = pruneUndefined(buildCopy(input, template));
   const normalizedSizes = normalizeSizes(renderRequest.sizes);
   const sizes = normalizedSizes.length ? normalizedSizes : (["1080x1080"] as AspectRatio[]);
   const slug = slugify(input.brand_name);
@@ -189,7 +202,8 @@ async function enqueueBackgroundTasks(campaignId: string, variants: VariantBuild
   const publishPromises = variants.map((variant) => {
     const payload: BgTaskPayload = {
       campaign_id: campaignId,
-      ...variant
+      ...variant,
+      copy: pruneUndefined(variant.copy)
     };
     return pubsub.topic(BG_TOPIC).publishMessage({ json: payload });
   });
