@@ -1,0 +1,11 @@
+steps:
+- name: 'gcr.io/cloud-builders/docker'
+  args: [
+    'build',
+    '-t', 'asia-northeast1-docker.pkg.dev/banner-factory/banner-factory/prompt-builder:latest',
+    '-f', 'services/prompt-builder/Dockerfile',
+    '.'
+  ]
+images:
+- 'asia-northeast1-docker.pkg.dev/banner-factory/banner-factory/prompt-builder:latest'
+timeout: 1200s
