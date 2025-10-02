@@ -2,8 +2,6 @@ import Fastify from "fastify";
 import cors from "@fastify/cors";
 import { Firestore } from "@google-cloud/firestore";
 import { PubSub } from "@google-cloud/pubsub";
-import fetch from "node-fetch";
-import type { FastifyBaseLogger } from "fastify";
 import {
   AspectRatio,
   InputSchema,
@@ -14,7 +12,11 @@ import {
   RenderJobStatus,
   RenderJobStatusSchema,
   TemplateCode,
+  type CampaignInput,
   type CopyBlock,
+  buildPrompt,
+  buildCopy,
+  slugify,
   createHashId,
   isoUtcNow
 } from "@banner/shared";
@@ -23,7 +25,6 @@ const firestore = new Firestore();
 const pubsub = new PubSub();
 
 const BG_TOPIC = process.env.BG_TOPIC ?? "bg-tasks";
-const PROMPT_BUILDER_HOST = process.env.PROMPT_BUILDER_HOST ?? "";
 
 function toPublicUrl(gcsPath?: string | null): string | null {
   if (!gcsPath) {
@@ -50,7 +51,7 @@ function coerceStatus(status: unknown): RenderJobStatus {
 
 type Tone = "救済" | "緊急" | "権威";
 
-interface PromptBuilderVariantResult {
+interface VariantBuildResult {
   variant_id: string;
   prompt: string;
   seed: string;
@@ -63,56 +64,128 @@ interface PromptBuilderVariantResult {
   copy: CopyBlock;
 }
 
-interface BgTaskPayload extends PromptBuilderVariantResult {
+interface BgTaskPayload extends VariantBuildResult {
   campaign_id: string;
 }
 
-async function requestPromptBuilderVariant(
+const DEFAULT_TONE: Record<TemplateCode, Tone> = {
+  T1: "救済",
+  T2: "緊急",
+  T3: "権威"
+};
+
+function resolveTone(template: TemplateCode, input: CampaignInput): Tone {
+  return (input.tone as Tone | undefined) ?? DEFAULT_TONE[template];
+}
+
+function selectInput(renderRequest: RenderRequest, variantIndex: number): CampaignInput {
+  const index = variantIndex % renderRequest.inputs.length;
+  return renderRequest.inputs[index];
+}
+
+function collectRefs(input: CampaignInput): string[] {
+  const refs = new Set<string>();
+  (input.reference_banners ?? []).forEach((ref) => refs.add(ref));
+  (input.bg_style_refs ?? []).forEach((ref) => refs.add(ref));
+  return Array.from(refs);
+}
+
+async function createVariantDocument(
   campaignId: string,
   template: TemplateCode,
-  variantIndex: number,
-  renderRequest: RenderRequest,
-  log: FastifyBaseLogger
-): Promise<PromptBuilderVariantResult> {
-  const url = `${PROMPT_BUILDER_HOST}/workflows/variants`;
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      campaign_id: campaignId,
-      template,
-      variant_index: variantIndex,
-      request: renderRequest
-    })
-  });
-
-  if (!response.ok) {
-    const body = await response.text();
-    log.error({ status: response.status, body }, "prompt-builder request failed");
-    throw new Error(`prompt-builder responded with status ${response.status}`);
+  tone: Tone,
+  input: CampaignInput,
+  prompt: string,
+  seed: string,
+  refs: string[],
+  copy: CopyBlock,
+  sizes: AspectRatio[],
+  slug: string
+): Promise<string> {
+  const styleCode = input.style_code ?? "AUTO";
+  const variantId = createHashId("variant", `${campaignId}-${template}-${tone}-${styleCode}-${seed}`);
+  const promptHash = createHashId("prompt", prompt, 24);
+  const refsHash = refs.length ? createHashId("refs", refs.join(","), 16) : undefined;
+  const variantRef = firestore.collection("variant").doc(variantId);
+  const baseData: Record<string, unknown> = {
+    variant_id: variantId,
+    campaign_id: campaignId,
+    template,
+    tone,
+    style_code: styleCode === "AUTO" ? template : styleCode,
+    prompt,
+    prompt_hash: promptHash,
+    seed,
+    refs,
+    copy,
+    sizes,
+    brand: input.brand_name,
+    slug,
+    created_at: isoUtcNow()
+  };
+  if (refsHash) {
+    baseData.refs_hash = refsHash;
   }
+  await variantRef.set(baseData);
+  await variantRef.collection("logs").add({
+    event: "prompt_generated",
+    created_at: isoUtcNow()
+  });
+  return variantId;
+}
 
-  const json = (await response.json()) as PromptBuilderVariantResult;
+async function buildVariant(
+  renderRequest: RenderRequest,
+  template: TemplateCode,
+  variantIndex: number
+): Promise<VariantBuildResult> {
+  const input = selectInput(renderRequest, variantIndex);
+  const tone = resolveTone(template, input);
+  const refs = collectRefs(input);
+  const { prompt, seed } = buildPrompt(input, { template, tone, refs });
+  const copy = buildCopy(input, template);
+  const normalizedSizes = normalizeSizes(renderRequest.sizes);
+  const sizes = normalizedSizes.length ? normalizedSizes : (["1080x1080"] as AspectRatio[]);
+  const slug = slugify(input.brand_name);
+  const variantId = await createVariantDocument(
+    renderRequest.campaign_id,
+    template,
+    tone,
+    input,
+    prompt,
+    seed,
+    refs,
+    copy,
+    sizes,
+    slug
+  );
+
   return {
-    ...json,
-    refs: Array.isArray(json.refs) ? json.refs : [],
-    sizes: normalizeSizes(json.sizes ?? renderRequest.sizes ?? []),
-    copy: json.copy
+    variant_id: variantId,
+    prompt,
+    seed,
+    template,
+    tone,
+    refs,
+    sizes,
+    brand: input.brand_name,
+    slug,
+    copy
   };
 }
 
-async function buildVariantsFromRequest(renderRequest: RenderRequest, log: FastifyBaseLogger): Promise<PromptBuilderVariantResult[]> {
-  const variants: PromptBuilderVariantResult[] = [];
+async function buildVariantsFromRequest(renderRequest: RenderRequest): Promise<VariantBuildResult[]> {
+  const variants: VariantBuildResult[] = [];
   for (const template of renderRequest.templates) {
     for (let idx = 0; idx < renderRequest.count_per_template; idx += 1) {
-      const variant = await requestPromptBuilderVariant(renderRequest.campaign_id, template, idx, renderRequest, log);
+      const variant = await buildVariant(renderRequest, template, idx);
       variants.push(variant);
     }
   }
   return variants;
 }
 
-async function enqueueBackgroundTasks(campaignId: string, variants: PromptBuilderVariantResult[]): Promise<string[]> {
+async function enqueueBackgroundTasks(campaignId: string, variants: VariantBuildResult[]): Promise<string[]> {
   const publishPromises = variants.map((variant) => {
     const payload: BgTaskPayload = {
       campaign_id: campaignId,
@@ -172,11 +245,6 @@ export async function buildServer() {
 
     const renderRequest = parsed.data;
 
-    if (!PROMPT_BUILDER_HOST) {
-      request.log.error("PROMPT_BUILDER_HOST env var is not configured");
-      return reply.status(503).send({ error: "SERVICE_UNAVAILABLE", message: "Prompt builder endpoint is not configured" });
-    }
-
     if (!renderRequest.templates.length) {
       return reply.status(400).send({ error: "INVALID_PAYLOAD", message: "templates must contain at least one template" });
     }
@@ -186,7 +254,7 @@ export async function buildServer() {
     }
 
     try {
-      const variants = await buildVariantsFromRequest(renderRequest, request.log);
+      const variants = await buildVariantsFromRequest(renderRequest);
       const messageIds = await enqueueBackgroundTasks(renderRequest.campaign_id, variants);
 
       const campaignDoc = firestore.collection("campaign").doc(renderRequest.campaign_id);
