@@ -1,0 +1,11 @@
+steps:
+- name: 'gcr.io/cloud-builders/docker'
+  args: [
+    'build',
+    '-t', 'asia-northeast1-docker.pkg.dev/banner-factory/banner-factory/bg-generator:latest',
+    '-f', 'services/bg-generator/Dockerfile',
+    '.'
+  ]
+images:
+- 'asia-northeast1-docker.pkg.dev/banner-factory/banner-factory/bg-generator:latest'
+timeout: 1200s

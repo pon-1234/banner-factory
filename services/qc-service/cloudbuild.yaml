@@ -1,0 +1,11 @@
+steps:
+- name: 'gcr.io/cloud-builders/docker'
+  args: [
+    'build',
+    '-t', 'asia-northeast1-docker.pkg.dev/banner-factory/banner-factory/qc-service:latest',
+    '-f', 'services/qc-service/Dockerfile',
+    '.'
+  ]
+images:
+- 'asia-northeast1-docker.pkg.dev/banner-factory/banner-factory/qc-service:latest'
+timeout: 1200s
