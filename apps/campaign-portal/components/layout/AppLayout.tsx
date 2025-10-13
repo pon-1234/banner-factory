@@ -4,6 +4,7 @@ import { useRouter } from "next/router";
 import type { ReactNode } from "react";
 
 const NAV_ITEMS: Array<{ label: string; href: string }> = [
+  { label: "キャンペーン一覧", href: "/campaign" },
   { label: "キャンペーン作成", href: "/campaign/new" },
   { label: "ステータス確認", href: "/campaign/status" }
 ];

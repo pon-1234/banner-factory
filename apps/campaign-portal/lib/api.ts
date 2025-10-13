@@ -222,6 +222,42 @@ export async function fetchCampaignProgress(campaignId: string): Promise<Campaig
   return res.json() as Promise<CampaignProgressResponse>;
 }
 
+export interface CampaignListItem {
+  campaign_id: string;
+  status: string;
+  created_at?: string;
+  updated_at?: string;
+  render_variant_count?: number;
+  last_render_request_at?: string;
+  input?: Record<string, unknown>;
+}
+
+export interface CampaignListResponse {
+  campaigns: CampaignListItem[];
+  next_cursor: string | null;
+}
+
+export async function fetchCampaignList(params?: { cursor?: string; limit?: number }): Promise<CampaignListResponse> {
+  if (!INGEST_API_BASE_URL) {
+    throw new ApiError("Ingest APIのエンドポイントが設定されていません。");
+  }
+
+  const searchParams = new URLSearchParams();
+  if (params?.cursor) {
+    searchParams.set("cursor", params.cursor);
+  }
+  if (params?.limit) {
+    searchParams.set("limit", String(params.limit));
+  }
+
+  const url = `${INGEST_API_BASE_URL}/v1/campaigns${searchParams.toString() ? `?${searchParams.toString()}` : ""}`;
+  const res = await fetch(url);
+  if (!res.ok) {
+    throw new ApiError(`キャンペーン一覧の取得に失敗しました (${res.status})`, res.status);
+  }
+  return res.json() as Promise<CampaignListResponse>;
+}
+
 export async function logSubmission(event: { campaignId: string; payload: CampaignInput }) {
   try {
     await fetch("/api/submissions", {

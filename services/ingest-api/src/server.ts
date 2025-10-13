@@ -7,10 +7,6 @@ import {
   InputSchema,
   RenderRequestSchema,
   type RenderRequest,
-  RenderJobSchema,
-  type RenderJobRecord,
-  RenderJobStatus,
-  RenderJobStatusSchema,
   TemplateCode,
   type CampaignInput,
   type CopyBlock,
@@ -25,6 +21,18 @@ const firestore = new Firestore();
 const pubsub = new PubSub();
 
 const BG_TOPIC = process.env.BG_TOPIC ?? "bg-tasks";
+
+type RenderJobStatus = "queued" | "processing" | "composited" | "qc_passed" | "manual_review" | "delivered" | "failed";
+
+const RENDER_JOB_STATUS_SET = new Set<RenderJobStatus>([
+  "queued",
+  "processing",
+  "composited",
+  "qc_passed",
+  "manual_review",
+  "delivered",
+  "failed"
+]);
 
 function toPublicUrl(gcsPath?: string | null): string | null {
   if (!gcsPath) {
@@ -45,8 +53,10 @@ function normalizeSizes(sizes: unknown): AspectRatio[] {
 }
 
 function coerceStatus(status: unknown): RenderJobStatus {
-  const parsed = RenderJobStatusSchema.safeParse(status);
-  return parsed.success ? parsed.data : "queued";
+  if (typeof status === "string" && RENDER_JOB_STATUS_SET.has(status as RenderJobStatus)) {
+    return status as RenderJobStatus;
+  }
+  return "queued";
 }
 
 function pruneUndefined<T>(value: T): T {
@@ -246,6 +256,28 @@ export async function buildServer() {
     return reply.status(201).send({ campaign_id: campaignId });
   });
 
+  app.get("/v1/campaigns", async (request, reply) => {
+    const query = request.query as { limit?: string; cursor?: string };
+    const pageSize = Math.min(Math.max(Number(query.limit) || 20, 1), 100);
+
+    let collection = firestore.collection("campaign").orderBy("updated_at", "desc").limit(pageSize + 1);
+    if (query.cursor) {
+      const decoded = Buffer.from(query.cursor, "base64").toString("utf8");
+      const cursorDoc = await firestore.collection("campaign").doc(decoded).get();
+      if (cursorDoc.exists) {
+        collection = collection.startAfter(cursorDoc);
+      }
+    }
+
+    const snapshot = await collection.get();
+    const docs = snapshot.docs.slice(0, pageSize);
+    const campaigns = docs.map((doc) => doc.data());
+    const lastDoc = snapshot.docs.length > pageSize ? snapshot.docs[pageSize] : null;
+    const nextCursor = lastDoc ? Buffer.from(lastDoc.id, "utf8").toString("base64") : null;
+
+    return reply.send({ campaigns, next_cursor: nextCursor });
+  });
+
   app.post("/v1/campaigns/:campaignId/render", async (request, reply) => {
     const parsed = RenderRequestSchema.safeParse({
       ...(request.body as object),
@@ -328,7 +360,7 @@ export async function buildServer() {
       return reply.status(404).send({ error: "NOT_FOUND" });
     }
 
-    const renderJobs = new Map<string, RenderJobRecord>();
+    const renderJobs = new Map<string, Record<string, unknown>>();
     renderJobsSnap.forEach((doc) => {
       const raw = doc.data();
       const enriched = {
@@ -340,19 +372,27 @@ export async function buildServer() {
         status: coerceStatus(raw.status),
         updated_at: raw.updated_at ?? isoUtcNow()
       } as Record<string, unknown>;
-      const parsed = RenderJobSchema.safeParse(enriched);
-      if (parsed.success) {
-        renderJobs.set(doc.id, parsed.data);
-      } else {
-        renderJobs.set(doc.id, {
-          render_job_id: doc.id,
-          campaign_id: campaignId,
-          variant_id: (raw.variant_id as string) ?? doc.id.split("-")[0],
-          size: (raw.size as AspectRatio) ?? "1080x1080",
-          status: coerceStatus(raw.status),
-          updated_at: enriched.updated_at as string
-        } as RenderJobRecord);
-      }
+      renderJobs.set(doc.id, {
+        render_job_id: doc.id,
+        campaign_id: campaignId,
+        variant_id: (enriched.variant_id as string) ?? doc.id.split("-")[0],
+        size: (enriched.size as AspectRatio) ?? "1080x1080",
+        status: enriched.status,
+        asset_path: enriched.asset_path ?? null,
+        asset_url: enriched.asset_url ?? null,
+        preview_path: enriched.preview_path ?? null,
+        preview_url: enriched.preview_url ?? null,
+        generation_meta_path: enriched.generation_meta_path ?? null,
+        qc_passed: enriched.qc_passed ?? false,
+        qc_report_path: enriched.qc_report_path ?? null,
+        qc_issues: enriched.qc_issues ?? [],
+        queued_at: enriched.queued_at ?? null,
+        processing_started_at: enriched.processing_started_at ?? null,
+        composited_at: enriched.composited_at ?? null,
+        qc_completed_at: enriched.qc_completed_at ?? null,
+        delivered_at: enriched.delivered_at ?? null,
+        updated_at: enriched.updated_at as string
+      });
     });
 
     const variants = variantsSnap.docs.map((doc) => {
