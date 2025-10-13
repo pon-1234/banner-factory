@@ -40,6 +40,8 @@ const QC_TOPIC = process.env.QC_TOPIC ?? "qc-tasks";
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY ?? "";
 const OPENAI_IMAGE_MODEL = process.env.OPENAI_IMAGE_MODEL ?? "gpt-image-1";
 const OPENAI_IMAGE_QUALITY = process.env.OPENAI_IMAGE_QUALITY ?? "high";
+const OPENAI_COPY_MODEL = process.env.OPENAI_COPY_MODEL ?? "gpt-4.1-mini";
+const ENABLE_DYNAMIC_COPY = process.env.ENABLE_DYNAMIC_COPY?.toLowerCase() !== "false";
 
 const openaiClient = OPENAI_API_KEY ? new OpenAI({ apiKey: OPENAI_API_KEY }) : null;
 
@@ -88,6 +90,8 @@ interface GenerationMetadata {
   copy_lines?: string[];
   guidance_lines?: string[];
   fallback_reason?: string;
+  copy_source?: "template" | "generated" | "cached";
+  copy_model?: string;
 }
 
 interface ComposeResult {
@@ -119,6 +123,148 @@ function collectCopyLines(copy: CopyPayload): string[] {
     lines.push(`Stat note: ${copy.stat_note}`);
   }
   return lines;
+}
+
+function sanitizeString(value: string | undefined | null): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed.length ? trimmed : undefined;
+}
+
+function sanitizeGeneratedCopy(raw: Partial<CopyPayload>, fallback: CopyPayload): CopyPayload {
+  const headline = sanitizeString(raw.headline) ?? fallback.headline;
+  const cta = sanitizeString(raw.cta) ?? fallback.cta;
+  const sub = sanitizeString(raw.sub) ?? fallback.sub;
+  const disclaimer = sanitizeString(raw.disclaimer) ?? fallback.disclaimer;
+  const statNote = sanitizeString(raw.stat_note) ?? fallback.stat_note;
+  const badges = Array.isArray(raw.badges)
+    ? raw.badges
+        .map((item) => sanitizeString(typeof item === "string" ? item : String(item)))
+        .filter((item): item is string => Boolean(item))
+    : fallback.badges ?? [];
+
+  return {
+    headline,
+    sub,
+    badges: badges.length ? badges : undefined,
+    cta,
+    disclaimer,
+    stat_note: statNote
+  };
+}
+
+async function loadStoredDynamicCopy(variantId: string): Promise<{ copy: CopyPayload; model?: string } | null> {
+  const snapshot = await firestore.collection("variant").doc(variantId).get();
+  if (!snapshot.exists) {
+    return null;
+  }
+  const data = snapshot.data() as Record<string, unknown> | undefined;
+  const stored = data?.dynamic_copy as Partial<CopyPayload> | undefined;
+  if (!stored || typeof stored.headline !== "string" || typeof stored.cta !== "string") {
+    return null;
+  }
+  const copy: CopyPayload = {
+    headline: stored.headline,
+    sub: typeof stored.sub === "string" ? stored.sub : undefined,
+    badges: Array.isArray(stored.badges) ? (stored.badges as string[]) : undefined,
+    cta: stored.cta,
+    disclaimer: typeof stored.disclaimer === "string" ? stored.disclaimer : undefined,
+    stat_note: typeof stored.stat_note === "string" ? stored.stat_note : undefined
+  };
+  const model = typeof data?.dynamic_copy_model === "string" ? (data.dynamic_copy_model as string) : undefined;
+  return { copy, model };
+}
+
+async function generateDynamicCopy(
+  payload: ComposeTaskPayload,
+  log: FastifyBaseLogger
+): Promise<{ copy: CopyPayload; model: string } | null> {
+  if (!openaiClient || !ENABLE_DYNAMIC_COPY) {
+    return null;
+  }
+
+  try {
+    const completion = await openaiClient.chat.completions.create({
+      model: OPENAI_COPY_MODEL,
+      temperature: 0.7,
+      response_format: { type: "json_object" },
+      messages: [
+        {
+          role: "system",
+          content:
+            "あなたは日本語の広告コピーライターです。見出し・補足・CTA・バッジ・免責・注記を生成し、必ず JSON オブジェクトで返してください。バッジは最大3件、CTAは12文字以内を推奨します。"
+        },
+        {
+          role: "user",
+          content: `以下の情報を基に、デジタル広告のテキスト要素を生成してください。JSON で {"headline","sub","badges","cta","disclaimer","stat_note"} を返してください。未使用のキーは null 可。
+
+ブランド: ${payload.brand}
+トーン: ${payload.tone}
+テンプレート: ${payload.template}
+サイズ: ${payload.size}
+キャンペーンの説明プロンプト: ${payload.prompt}
+既存コピー案: ${JSON.stringify(payload.copy)}
+
+制約:
+- 文字は日本語で自然かつ読みやすく。
+- 誇大広告や禁止語は避ける。
+- 指定されたトーンに合わせ、かつブランドの信頼性を損なわない。
+- CTAは行動を促す短い表現に。
+- JSONのみを出力してください。`
+        }
+      ]
+    });
+
+    const content = completion.choices[0]?.message?.content;
+    if (!content) {
+      throw new Error("empty completion content");
+    }
+    const parsed = JSON.parse(content) as Partial<CopyPayload>;
+    const normalized = sanitizeGeneratedCopy(parsed, payload.copy);
+
+    await firestore
+      .collection("variant")
+      .doc(payload.variant_id)
+      .set(
+        {
+          dynamic_copy: normalized,
+          dynamic_copy_model: OPENAI_COPY_MODEL,
+          dynamic_copy_generated_at: isoUtcNow()
+        },
+        { merge: true }
+      );
+
+    return { copy: normalized, model: OPENAI_COPY_MODEL };
+  } catch (error) {
+    log.warn({ err: error, variant: payload.variant_id }, "failed to generate dynamic copy");
+    return null;
+  }
+}
+
+async function resolveCopy(
+  payload: ComposeTaskPayload,
+  log: FastifyBaseLogger
+): Promise<{ copy: CopyPayload; source: "template" | "generated" | "cached"; model?: string }> {
+  if (!openaiClient || !ENABLE_DYNAMIC_COPY) {
+    return { copy: payload.copy, source: "template" };
+  }
+
+  try {
+    const stored = await loadStoredDynamicCopy(payload.variant_id);
+    if (stored) {
+      return { copy: stored.copy, source: "cached", model: stored.model };
+    }
+    const generated = await generateDynamicCopy(payload, log);
+    if (generated) {
+      return { copy: generated.copy, source: "generated", model: generated.model };
+    }
+  } catch (error) {
+    log.warn({ err: error, variant: payload.variant_id }, "dynamic copy lookup failed");
+  }
+
+  return { copy: payload.copy, source: "template" };
 }
 
 function buildOpenAiPrompt(payload: ComposeTaskPayload, copyLines: string[]): { finalPrompt: string; guidance: string[] } {
@@ -324,17 +470,36 @@ async function composeBanner(payload: ComposeTaskPayload, log: FastifyBaseLogger
     throw new Error(`Unsupported size ${payload.size}`);
   }
 
+  const { copy, source: copySource, model: copyModel } = await resolveCopy(payload, log);
+  payload.copy = copy;
+
   if (openaiClient) {
     try {
-      return await generateOpenAiBanner(payload, size);
+      const result = await generateOpenAiBanner(payload, size);
+      result.metadata.copy_source = copySource;
+      if (copyModel) {
+        result.metadata.copy_model = copyModel;
+      }
+      return result;
     } catch (error) {
       log.error({ err: error, variant: payload.variant_id, size: payload.size }, "openai generation failed, using fallback");
       const reason = error instanceof Error ? error.message : "openai_generation_failed";
-      return await composeFallbackBanner(payload, size, reason);
+      const fallback = await composeFallbackBanner(payload, size, reason);
+      fallback.metadata.copy_source = copySource;
+      if (copyModel) {
+        fallback.metadata.copy_model = copyModel;
+      }
+      return fallback;
     }
   }
 
-  return composeFallbackBanner(payload, size, OPENAI_API_KEY ? "openai_client_unavailable" : "missing_openai_api_key");
+  const reason = OPENAI_API_KEY ? "openai_client_unavailable" : "missing_openai_api_key";
+  const fallback = await composeFallbackBanner(payload, size, reason);
+  fallback.metadata.copy_source = copySource;
+  if (copyModel) {
+    fallback.metadata.copy_model = copyModel;
+  }
+  return fallback;
 }
 
 async function saveBufferToGcs(
@@ -457,7 +622,12 @@ async function publishQcTask(
   });
 }
 
-async function handleTask(payload: ComposeTaskPayload, log: FastifyBaseLogger) {
+interface TaskResult {
+  ok: boolean;
+  error?: string;
+}
+
+async function handleTask(payload: ComposeTaskPayload, log: FastifyBaseLogger): Promise<TaskResult> {
   const renderJobId = `${payload.variant_id}-${payload.size}`;
   await firestore.collection("render_job").doc(renderJobId).set(
     {
@@ -487,7 +657,7 @@ async function handleTask(payload: ComposeTaskPayload, log: FastifyBaseLogger) {
       },
       { merge: true }
     );
-    throw error;
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
   }
 
   const { assetPath, assetUrl, previewPath, previewUrl, metadataPath } = await saveOutput(result, payload);
@@ -513,6 +683,7 @@ async function handleTask(payload: ComposeTaskPayload, log: FastifyBaseLogger) {
   );
 
   await publishQcTask(payload, assetPath, previewPath, metadataPath);
+  return { ok: true };
 }
 
 function decodeMessage(body: any): ComposeTaskPayload {
@@ -528,11 +699,14 @@ export function buildServer() {
   app.post("/tasks/compositor", async (request, reply) => {
     try {
       const payload = decodeMessage(request.body);
-      await handleTask(payload, request.log);
-      return reply.status(204).send();
+      const result = await handleTask(payload, request.log);
+      if (result.ok) {
+        return reply.status(200).send({ status: "processed" });
+      }
+      return reply.status(200).send({ status: "failed", error: result.error ?? "unknown" });
     } catch (err) {
       request.log.error({ err }, "failed to compose banner");
-      return reply.status(500).send({ error: "COMPOSITION_FAILED", message: (err as Error).message });
+      return reply.status(200).send({ status: "failed", error: err instanceof Error ? err.message : String(err) });
     }
   });
   return app;

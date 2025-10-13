@@ -1,6 +1,7 @@
 import {
   Badge,
   Box,
+  Button,
   Divider,
   Heading,
   HStack,
@@ -66,7 +67,7 @@ export default function CampaignProgressPage({ campaignId, progress, error }: Ca
 
   if (error) {
     return (
-      <Stack minH="100vh" align="center" justify="center" p={6} bg={bg}>
+      <Stack minH="calc(100vh - 4rem)" align="center" justify="center" p={6} bg={bg}>
         <Box maxW="640px" w="full" p={10} rounded="lg" shadow="md" bg={surface} textAlign="center">
           <Heading size="lg" mb={4}>
             進捗情報を取得できませんでした
@@ -89,7 +90,7 @@ export default function CampaignProgressPage({ campaignId, progress, error }: Ca
   const brandName = (progress.campaign.input as { brand_name?: string } | undefined)?.brand_name ?? "キャンペーン";
 
   return (
-    <Stack minH="100vh" p={{ base: 4, md: 8 }} spacing={8} bg={bg}>
+    <Stack minH="calc(100vh - 4rem)" p={{ base: 4, md: 8 }} spacing={8} bg={bg}>
       <Stack direction={{ base: "column", md: "row" }} justify="space-between" align={{ base: "flex-start", md: "center" }} spacing={4}>
         <Box>
           <Heading size="lg" mb={1}>
@@ -108,6 +109,9 @@ export default function CampaignProgressPage({ campaignId, progress, error }: Ca
           >
             Firestoreドキュメントを確認
           </ChakraLink>
+          <Button as={Link} href={`/campaign/${campaignId}/gallery`} size="sm" colorScheme="blue">
+            ギャラリー表示
+          </Button>
         </HStack>
       </Stack>
 

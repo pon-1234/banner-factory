@@ -13,7 +13,7 @@ interface WizardLayoutProps {
 export function WizardLayout({ title, description, step, totalSteps, children, sidePanel }: WizardLayoutProps) {
   const progress = Math.round(((step + 1) / totalSteps) * 100);
   return (
-    <Flex direction={{ base: "column", lg: "row" }} minH="100vh">
+    <Flex direction={{ base: "column", lg: "row" }} minH="calc(100vh - 4rem)">
       <Box flex="1" p={{ base: 6, md: 10 }}>
         <Stack spacing={6} maxW="760px" mx="auto">
           <Stack spacing={3}>

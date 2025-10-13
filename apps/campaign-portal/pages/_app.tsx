@@ -1,6 +1,7 @@
 import type { AppProps } from "next/app";
 import { ChakraProvider, extendTheme } from "@chakra-ui/react";
 import Head from "next/head";
+import { AppLayout } from "@/components/layout/AppLayout";
 
 const theme = extendTheme({
   fonts: {
@@ -24,7 +25,9 @@ export default function MyApp({ Component, pageProps }: AppProps) {
         <title>Banner Factory Campaign Portal</title>
         <meta name="viewport" content="width=device-width, initial-scale=1" />
       </Head>
-      <Component {...pageProps} />
+      <AppLayout>
+        <Component {...pageProps} />
+      </AppLayout>
     </ChakraProvider>
   );
 }

@@ -33,7 +33,7 @@ import type { CampaignInput } from "@/lib/formSchema";
 import { CampaignInputSchema } from "@/lib/formSchema";
 import type { FieldKey } from "@/lib/fieldConfig";
 import { useCampaignDraft } from "@/hooks/useCampaignDraft";
-import { createCampaign, logSubmission } from "@/lib/api";
+import { createCampaign, enqueueRenderRequest, logSubmission, sanitizeCampaignInput } from "@/lib/api";
 import { RepeatIcon } from "@chakra-ui/icons";
 
 const errorMap: z.ZodErrorMap = (issue, ctx) => {
@@ -149,15 +149,15 @@ const wizardSteps: Array<{ id: string; title: string; description: string; field
 ];
 
 const emptyDefaults: CampaignInput = {
-  lp_url: "",
+  lp_url: undefined as CampaignInput["lp_url"],
   brand_name: "",
   objective: "相談",
   target_note: "",
   pain_points: [] as unknown as CampaignInput["pain_points"],
   value_props: [] as unknown as CampaignInput["value_props"],
   cta_type: "",
-  brand_color_hex: "#1A202C",
-  logo_url: "",
+  brand_color_hex: undefined as CampaignInput["brand_color_hex"],
+  logo_url: undefined as CampaignInput["logo_url"],
   forbidden_phrases: [],
   reference_banners: [],
   bg_style_refs: [],
@@ -260,13 +260,31 @@ export default function CampaignFormPage() {
     setSubmitError(null);
     await formMethods.handleSubmit(async (values) => {
       try {
-        const response = await createCampaign(values);
-        await logSubmission({ campaignId: response.campaign_id, payload: values });
+        const sanitizedInput = sanitizeCampaignInput(values);
+        const response = await createCampaign(sanitizedInput);
+        await logSubmission({ campaignId: response.campaign_id, payload: sanitizedInput });
+
+        let renderQueued = false;
+        try {
+          await enqueueRenderRequest({ campaignId: response.campaign_id, input: sanitizedInput });
+          renderQueued = true;
+          toast({ title: "レンダーを開始しました", status: "success", duration: 4000, isClosable: true });
+        } catch (renderErr: any) {
+          console.error(renderErr);
+          toast({
+            title: "レンダーの開始に失敗しました",
+            description: renderErr?.message ?? "時間をおいて再度お試しください",
+            status: "warning",
+            duration: 5000,
+            isClosable: true
+          });
+        }
+
         clearDraft();
         toast({ title: "キャンペーンを登録しました", status: "success", duration: 4000, isClosable: true });
         router.push({
           pathname: "/campaign/success",
-          query: { id: response.campaign_id, brand: values.brand_name }
+          query: { id: response.campaign_id, brand: values.brand_name, render: renderQueued ? "queued" : "failed" }
         });
       } catch (err: any) {
         console.error(err);

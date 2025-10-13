@@ -5,7 +5,8 @@ import { useMemo } from "react";
 
 export default function CampaignSuccessPage() {
   const router = useRouter();
-  const { id, brand } = router.query;
+  const { id, brand, render } = router.query;
+  const renderStatus = Array.isArray(render) ? render[0] : render;
 
   const statusLink = useMemo(() => {
     if (!id) return null;
@@ -15,7 +16,7 @@ export default function CampaignSuccessPage() {
   }, [id]);
 
   return (
-    <Stack minH="100vh" align="center" justify="center" p={6} bg="gray.50">
+    <Stack minH="calc(100vh - 4rem)" align="center" justify="center" p={6} bg="gray.50">
       <Box bg="white" p={10} rounded="lg" shadow="md" maxW="560px" w="full" textAlign="center">
         <Heading size="lg" mb={4}>
           キャンペーンを登録しました
@@ -40,6 +41,16 @@ export default function CampaignSuccessPage() {
                 ステータス確認のために NEXT_PUBLIC_INGEST_API_BASE_URL を設定してください。
               </Text>
             )}
+            {renderStatus === "queued" ? (
+              <Text mt={3} color="green.600" fontWeight="semibold">
+                レンダーを自動で開始しました。進捗ダッシュボードからプレビューを確認できます。
+              </Text>
+            ) : null}
+            {renderStatus === "failed" ? (
+              <Text mt={3} color="orange.600" fontWeight="semibold">
+                レンダー開始に失敗しました。進捗ダッシュボードでステータスを確認し、必要に応じて再実行してください。
+              </Text>
+            ) : null}
           </AlertDescription>
         </Alert>
 
@@ -49,9 +60,6 @@ export default function CampaignSuccessPage() {
               進捗ダッシュボードを開く
             </Button>
           ) : null}
-          <Button as={Link} href="/campaign/render" variant="outline">
-            レンダー依頼に進む
-          </Button>
           <Button as={Link} href="/campaign/new" variant="ghost">
             もう一件作成する
           </Button>

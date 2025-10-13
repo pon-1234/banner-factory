@@ -16,6 +16,7 @@ import {
 import type { TemplateCode } from "@banner/shared/dist/types";
 import { buildCopy } from "@banner/shared/dist/copy";
 import type { CampaignInput } from "@/lib/formSchema";
+import { useMemo } from "react";
 import { STYLE_CODE_OPTIONS } from "@/lib/formSchema";
 
 interface PreviewPanelProps {
@@ -24,6 +25,16 @@ interface PreviewPanelProps {
 }
 
 export function PreviewPanel({ values, metadata }: PreviewPanelProps) {
+  type CopyInput = Parameters<typeof buildCopy>[0];
+
+  const copyInput = useMemo<CopyInput>(() => {
+    return {
+      ...values,
+      lp_url: values.lp_url ?? "",
+      logo_url: values.logo_url ?? "",
+      brand_color_hex: values.brand_color_hex ?? "#1A202C"
+    };
+  }, [values]);
   const styleDescription = STYLE_CODE_OPTIONS.find((item) => item.value === values.style_code)?.description;
   const canPreviewCopy = Boolean(
     values.brand_name &&
@@ -38,7 +49,7 @@ export function PreviewPanel({ values, metadata }: PreviewPanelProps) {
   const copyPreviews = canPreviewCopy
     ? templateCandidates.map((template) => ({
         template,
-        copy: buildCopy(values, template)
+        copy: buildCopy(copyInput, template)
       }))
     : [];
   return (

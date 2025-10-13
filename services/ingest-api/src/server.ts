@@ -158,7 +158,7 @@ async function buildVariant(
   const { prompt, seed } = buildPrompt(input, { template, tone, refs });
   const copy = pruneUndefined(buildCopy(input, template));
   const normalizedSizes = normalizeSizes(renderRequest.sizes);
-  const sizes = normalizedSizes.length ? normalizedSizes : (["1080x1080"] as AspectRatio[]);
+  const sizes = normalizedSizes.length ? ([normalizedSizes[0]] as AspectRatio[]) : (["1080x1080"] as AspectRatio[]);
   const slug = slugify(input.brand_name);
   const variantId = await createVariantDocument(
     renderRequest.campaign_id,
@@ -279,8 +279,8 @@ export async function buildServer() {
           variant_id: variant.variant_id,
           template: variant.template,
           tone: variant.tone,
-          sizes: variant.sizes
-        })),
+        sizes: variant.sizes
+      })),
         last_render_request_at: isoUtcNow(),
         updated_at: isoUtcNow()
       });
