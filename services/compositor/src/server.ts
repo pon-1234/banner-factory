@@ -136,23 +136,34 @@ function sanitizeString(value: string | undefined | null): string | undefined {
 function sanitizeGeneratedCopy(raw: Partial<CopyPayload>, fallback: CopyPayload): CopyPayload {
   const headline = sanitizeString(raw.headline) ?? fallback.headline;
   const cta = sanitizeString(raw.cta) ?? fallback.cta;
-  const sub = sanitizeString(raw.sub) ?? fallback.sub;
+  const sub = sanitizeString(raw.sub);
   const disclaimer = sanitizeString(raw.disclaimer) ?? fallback.disclaimer;
   const statNote = sanitizeString(raw.stat_note) ?? fallback.stat_note;
   const badges = Array.isArray(raw.badges)
     ? raw.badges
         .map((item) => sanitizeString(typeof item === "string" ? item : String(item)))
         .filter((item): item is string => Boolean(item))
-    : fallback.badges ?? [];
+    : fallback.badges;
 
-  return {
+  const result: CopyPayload = {
     headline,
-    sub,
-    badges: badges.length ? badges : undefined,
-    cta,
-    disclaimer,
-    stat_note: statNote
+    cta
   };
+
+  if (sub) {
+    result.sub = sub;
+  }
+  if (badges && badges.length) {
+    result.badges = badges;
+  }
+  if (disclaimer) {
+    result.disclaimer = disclaimer;
+  }
+  if (statNote) {
+    result.stat_note = statNote;
+  }
+
+  return result;
 }
 
 async function loadStoredDynamicCopy(variantId: string): Promise<{ copy: CopyPayload; model?: string } | null> {
@@ -301,7 +312,8 @@ async function generateOpenAiBanner(payload: ComposeTaskPayload, size: { width: 
     model: OPENAI_IMAGE_MODEL,
     prompt: finalPrompt,
     size: requestSize as "1024x1024" | "1024x1536" | "1536x1024" | "1024x1792",
-    quality: OPENAI_IMAGE_QUALITY as "low" | "medium" | "high" | "auto"
+    quality: OPENAI_IMAGE_QUALITY as "low" | "medium" | "high" | "auto",
+    response_format: "url"
   });
 
   const imageUrl = response.data?.[0]?.url;

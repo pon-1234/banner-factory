@@ -15,7 +15,7 @@ export interface AppLayoutProps {
 
 export function AppLayout({ children }: AppLayoutProps) {
   const router = useRouter();
-  const { asPath } = router;
+  const basePath = router.asPath.split("?")[0];
 
   return (
     <Flex direction="column" minH="100vh" bg="gray.50">
@@ -33,7 +33,8 @@ export function AppLayout({ children }: AppLayoutProps) {
           </ChakraLink>
           <Flex as="nav" align="center" gap={{ base: 2, md: 4 }} flexWrap="wrap" justify="flex-end">
             {NAV_ITEMS.map((item) => {
-              const isActive = asPath === item.href || asPath.startsWith(`${item.href}/`);
+              const isRoot = item.href === "/campaign";
+              const isActive = basePath === item.href || (!isRoot && basePath.startsWith(`${item.href}/`));
               return (
                 <Button
                   key={item.href}
