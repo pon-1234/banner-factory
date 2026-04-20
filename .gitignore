@@ -8,3 +8,13 @@ infra/terraform/.terraform/
 .gcloud/
 .bin/
 infra/terraform/terraform.tfstate.*
+
+# Local dev/test artifacts
+infra/terraform/tfplan
+infra/terraform/test-*.json
+test-openai-v*.json
+test-compositor-*.json
+test-compositor-curl.sh
+publish-test-message.py
+cleanup-images.sh
+services/compositor/test-fallback.ts
